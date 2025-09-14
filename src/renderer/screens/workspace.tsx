@@ -64,6 +64,7 @@ export function WorkspaceScreen() {
     right: [
       { icon: Terminal, label: 'Terminal', key: 'terminal' },
       { icon: Settings, label: 'Settings', key: 'settings' },
+      { icon: GitBranch, label: 'Push', key: 'Push' },
     ]
   }
 
