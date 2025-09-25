@@ -2,11 +2,15 @@ import { Folder, ChevronDown, FileText, GitBranch } from 'lucide-react'
 import { useState, useEffect, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CloneRepositoryModal } from '../components/ui/clone-repository-modal'
+import { useTheme, createThemeClasses } from '../theme/ThemeContext'
 
 // The "App" comes from the context bridge in preload/index.ts
 const { App } = window
 
 export function MainScreen() {
+  const { theme } = useTheme()
+  const themeClasses = createThemeClasses(theme)
+
   const [repoPath, setRepoPath] = useState('')
   const [selectedTool, setSelectedTool] = useState<
     'claude-code' | 'gemini-cli' | 'codex'
@@ -145,36 +149,42 @@ export function MainScreen() {
       selectedTool,
       selectedBranch,
     })
-    navigate('/workspace')
+    navigate('/workspace', {
+      state: {
+        projectPath: repoPath,
+        selectedTool,
+        selectedBranch,
+      },
+    })
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 flex">
+    <div className={`min-h-screen ${themeClasses.bgPrimary} flex`}>
       {/* Left Side - VS Code Style */}
       <div className="w-1/2 p-12">
         {/* Header */}
         <div className="mb-12">
-          <h1 className="text-5xl font-light text-gray-200 mb-4">
+          <h1 className={`text-5xl font-light ${themeClasses.textPrimary} mb-4`}>
             Almond Coder
           </h1>
-          <p className="text-lg text-gray-400">
+          <p className={`text-lg ${themeClasses.textSecondary}`}>
             Use AlmondCoder to stay ahead of the curve!
           </p>
         </div>
 
         {/* Start Section */}
         <div className="mb-10">
-          <h2 className="text-2xl font-normal text-white mb-6">Start</h2>
+          <h2 className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}>Start</h2>
           <div className="space-y-4">
             <button
-              className="flex items-center gap-3 text-blue-400 hover:text-blue-300 transition-colors text-base"
+              className={`flex items-center gap-3 ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
               onClick={handleBrowseFolder}
             >
               <Folder className="w-5 h-5" />
               Open...
             </button>
             <button
-              className="flex items-center gap-3 text-blue-400 hover:text-blue-300 transition-colors text-base"
+              className={`flex items-center gap-3 ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
               onClick={handleCloneRepository}
             >
               <GitBranch className="w-5 h-5" />
@@ -185,20 +195,20 @@ export function MainScreen() {
 
         {/* Recent Section */}
         <div>
-          <h2 className="text-2xl font-normal text-white mb-6">Recent</h2>
+          <h2 className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}>Recent</h2>
           {isLoading ? (
-            <div className="text-gray-400">Loading recent projects...</div>
+            <div className={themeClasses.textSecondary}>Loading recent projects...</div>
           ) : recentProjects.length > 0 ? (
             <div className="space-y-2">
               {recentProjects.map(project => (
                 <button
-                  className="block text-left text-blue-400 hover:text-blue-300 transition-colors text-base"
+                  className={`block text-left ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
                   key={project.path}
                   onClick={() => handleProjectSelect(project)}
                 >
                   <div className="flex justify-between items-center">
                     <span>{project.name}</span>
-                    <span className="text-sm text-gray-500 ml-4">
+                    <span className={`text-sm ${themeClasses.textMuted} ml-4`}>
                       {project.path.replace(/^.*\/([^/]+\/[^/]+)$/, '~/$1')}
                     </span>
                   </div>
@@ -206,34 +216,34 @@ export function MainScreen() {
               ))}
             </div>
           ) : (
-            <div className="text-gray-500 text-base">No recent projects</div>
+            <div className={`${themeClasses.textMuted} text-base`}>No recent projects</div>
           )}
         </div>
       </div>
 
       {/* Right Side - Configuration */}
-      <div className="w-1/2 bg-gray-800 p-12 border-l border-gray-700">
+      <div className={`w-1/2 ${themeClasses.bgSecondary} p-12 border-l ${themeClasses.borderPrimary}`}>
         <div className="max-w-md">
-          <h2 className="text-2xl font-normal text-white mb-8">
+          <h2 className={`text-2xl font-normal ${themeClasses.textPrimary} mb-8`}>
             Configure Project
           </h2>
 
           {/* Selected Path Display */}
           {repoPath && (
-            <div className="mb-6 p-4 bg-gray-900 rounded-lg border border-gray-600">
-              <div className="text-sm text-gray-400 mb-1">
+            <div className={`mb-6 p-4 ${themeClasses.bgTertiary} rounded-lg border ${themeClasses.borderSecondary}`}>
+              <div className={`text-sm ${themeClasses.textSecondary} mb-1`}>
                 Selected Repository
               </div>
-              <div className="text-white font-medium">
+              <div className={`${themeClasses.textPrimary} font-medium`}>
                 {repoPath.split('/').pop()}
               </div>
-              <div className="text-xs text-gray-500 mt-1">{repoPath}</div>
+              <div className={`text-xs ${themeClasses.textMuted} mt-1`}>{repoPath}</div>
             </div>
           )}
 
           {/* AI Assistant Selector */}
           <div className="mb-8">
-            <label className="block text-lg text-white mb-4">
+            <label className={`block text-lg ${themeClasses.textPrimary} mb-4`}>
               Choose AI Assistant
             </label>
             <div className="space-y-3">
@@ -244,13 +254,13 @@ export function MainScreen() {
                 >
                   <input
                     checked={selectedTool === tool}
-                    className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 focus:ring-blue-500"
+                    className={`w-4 h-4 ${themeClasses.textAccent} ${themeClasses.bgSecondary} ${themeClasses.borderPrimary} focus:ring-2 focus:ring-blue-500`}
                     name="ai-tool"
                     onChange={() => setSelectedTool(tool)}
                     type="radio"
                     value={tool}
                   />
-                  <span className="text-gray-300">
+                  <span className={themeClasses.textSecondary}>
                     {tool === 'claude-code'
                       ? 'Claude Code'
                       : tool === 'gemini-cli'
@@ -303,7 +313,7 @@ export function MainScreen() {
 
           {/* Launch Button */}
           <button
-            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+            className={`w-full px-6 py-3 ${themeClasses.btnPrimary} font-semibold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
             disabled={!repoPath || !selectedBranch}
             onClick={handleCreate}
           >

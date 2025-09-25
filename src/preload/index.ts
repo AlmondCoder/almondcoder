@@ -17,8 +17,42 @@ const API = {
     ipcRenderer.invoke('is-git-repository', path),
   getGitBranches: (path: string) =>
     ipcRenderer.invoke('get-git-branches', path),
+  getGitBranchGraph: (path: string) =>
+    ipcRenderer.invoke('get-git-branch-graph', path),
+  checkMergeConflicts: (params: {
+    path: string
+    sourceBranch: string
+    targetBranch: string
+  }) => ipcRenderer.invoke('check-merge-conflicts', params),
+  performMerge: (params: {
+    path: string
+    sourceBranch: string
+    targetBranch: string
+    resolutions?: any[]
+  }) => ipcRenderer.invoke('perform-merge', params),
   cloneRepository: (repoUrl: string) =>
     ipcRenderer.invoke('clone-repository', repoUrl),
+  executeCommand: (command: string) =>
+    ipcRenderer.invoke('execute-command', command),
+  executeCommandStream: (command: string, onOutput?: (data: {type: string, data: string}) => void) => {
+    if (onOutput) {
+      const handler = (event: any, data: {type: string, data: string}) => onOutput(data)
+      ipcRenderer.on('command-output', handler)
+
+      return ipcRenderer.invoke('execute-command-stream', command).finally(() => {
+        ipcRenderer.removeListener('command-output', handler)
+      })
+    }
+    return ipcRenderer.invoke('execute-command-stream', command)
+  },
+  getProjectFiles: (projectPath: string) =>
+    ipcRenderer.invoke('get-project-files', projectPath),
+  checkClaudeInstallation: () =>
+    ipcRenderer.invoke('check-claude-installation'),
+  installClaude: () =>
+    ipcRenderer.invoke('install-claude'),
+  setupClaudePath: () =>
+    ipcRenderer.invoke('setup-claude-path'),
 }
 
 contextBridge.exposeInMainWorld('App', API)

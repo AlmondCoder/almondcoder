@@ -35,6 +35,10 @@ export default {
     icon: `${resources}/build/icons/icon.icns`,
     category: 'public.app-category.utilities',
     target: ['zip', 'dmg', 'dir'],
+    entitlements: `${resources}/build/entitlements.mac.plist`,
+    entitlementsInherit: `${resources}/build/entitlements.mac.plist`,
+    gatekeeperAssess: false,
+    hardenedRuntime: true,
   },
 
   linux: {
