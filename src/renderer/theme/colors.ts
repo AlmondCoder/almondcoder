@@ -471,6 +471,8 @@ export const themes: Record<ThemeName, ColorPalette> = {
 }
 
 // Helper function to get current theme
-export const getCurrentTheme = (themeName: ThemeName = 'dark'): ColorPalette => {
+export const getCurrentTheme = (
+  themeName: ThemeName = 'dark'
+): ColorPalette => {
   return themes[themeName]
 }

@@ -1,7 +1,12 @@
 import { useState } from 'react'
 import { Palette, Type, Monitor } from 'lucide-react'
-import { useTheme, createThemeClasses, FontSize, FontFamily } from '../../theme/ThemeContext'
-import { ThemeName } from '../../theme/colors'
+import {
+  useTheme,
+  createThemeClasses,
+  type FontSize,
+  type FontFamily,
+} from '../../theme/ThemeContext'
+import type { ThemeName } from '../../theme/colors'
 
 type SettingsSection = 'theme' | 'appearance' | 'general'
 
@@ -9,7 +14,7 @@ const themeDisplayNames: Record<ThemeName, string> = {
   dark: 'Dark',
   light: 'Light',
   midnight: 'Midnight',
-  ocean: 'Ocean'
+  ocean: 'Ocean',
 }
 
 const fontSizeDisplayNames: Record<FontSize, string> = {
@@ -18,18 +23,26 @@ const fontSizeDisplayNames: Record<FontSize, string> = {
   base: 'Default',
   lg: 'Large',
   xl: 'Extra Large',
-  xxl: 'XXL'
+  xxl: 'XXL',
 }
 
 const fontFamilyDisplayNames: Record<FontFamily, string> = {
   inter: 'Inter (Default)',
   system: 'System Font',
   mono: 'Monospace',
-  serif: 'Serif'
+  serif: 'Serif',
 }
 
 export function Settings() {
-  const { theme, themeName, setTheme, availableThemes, fontPreferences, setFontSize, setFontFamily } = useTheme()
+  const {
+    theme,
+    themeName,
+    setTheme,
+    availableThemes,
+    fontPreferences,
+    setFontSize,
+    setFontFamily,
+  } = useTheme()
   const themeClasses = createThemeClasses(theme)
   const [activeSection, setActiveSection] = useState<SettingsSection>('theme')
 
@@ -42,17 +55,21 @@ export function Settings() {
   const renderThemeSection = () => (
     <div className="space-y-6">
       <div>
-        <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}>Color Theme</h3>
+        <h3
+          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
+        >
+          Color Theme
+        </h3>
         <div className="grid grid-cols-2 gap-3">
-          {availableThemes.map((themeOption) => (
+          {availableThemes.map(themeOption => (
             <button
-              key={themeOption}
-              onClick={() => setTheme(themeOption)}
               className={`p-4 rounded-lg border transition-all ${
                 themeName === themeOption
                   ? `${themeClasses.borderFocus} ${themeClasses.bgTertiary}`
                   : `${themeClasses.borderSecondary} ${themeClasses.bgCard} hover:${themeClasses.bgTertiary}`
               }`}
+              key={themeOption}
+              onClick={() => setTheme(themeOption)}
             >
               <div className="flex items-center justify-between">
                 <div className="text-left">
@@ -67,7 +84,10 @@ export function Settings() {
                   </div>
                 </div>
                 {themeName === themeOption && (
-                  <div className={`w-4 h-4 rounded-full ${themeClasses.textAccent}`} style={{ backgroundColor: 'currentColor' }} />
+                  <div
+                    className={`w-4 h-4 rounded-full ${themeClasses.textAccent}`}
+                    style={{ backgroundColor: 'currentColor' }}
+                  />
                 )}
               </div>
             </button>
@@ -80,17 +100,21 @@ export function Settings() {
   const renderAppearanceSection = () => (
     <div className="space-y-6">
       <div>
-        <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}>Font Size</h3>
+        <h3
+          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
+        >
+          Font Size
+        </h3>
         <div className="grid grid-cols-3 gap-3">
           {Object.entries(fontSizeDisplayNames).map(([size, displayName]) => (
             <button
-              key={size}
-              onClick={() => setFontSize(size as FontSize)}
               className={`p-3 rounded-lg border text-center transition-all ${
                 fontPreferences.size === size
                   ? `${themeClasses.borderFocus} ${themeClasses.bgTertiary}`
                   : `${themeClasses.borderSecondary} ${themeClasses.bgCard} hover:${themeClasses.bgTertiary}`
               }`}
+              key={size}
+              onClick={() => setFontSize(size as FontSize)}
             >
               <div className={`font-medium ${themeClasses.textPrimary}`}>
                 {displayName}
@@ -98,7 +122,18 @@ export function Settings() {
               <div
                 className={`text-sm ${themeClasses.textSecondary} mt-1`}
                 style={{
-                  fontSize: size === 'xs' ? '10px' : size === 'sm' ? '12px' : size === 'base' ? '14px' : size === 'lg' ? '16px' : size === 'xl' ? '18px' : '20px'
+                  fontSize:
+                    size === 'xs'
+                      ? '10px'
+                      : size === 'sm'
+                        ? '12px'
+                        : size === 'base'
+                          ? '14px'
+                          : size === 'lg'
+                            ? '16px'
+                            : size === 'xl'
+                              ? '18px'
+                              : '20px',
                 }}
               >
                 Sample text
@@ -109,31 +144,44 @@ export function Settings() {
       </div>
 
       <div>
-        <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}>Font Family</h3>
+        <h3
+          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
+        >
+          Font Family
+        </h3>
         <div className="grid grid-cols-2 gap-3">
-          {Object.entries(fontFamilyDisplayNames).map(([family, displayName]) => (
-            <button
-              key={family}
-              onClick={() => setFontFamily(family as FontFamily)}
-              className={`p-4 rounded-lg border text-left transition-all ${
-                fontPreferences.family === family
-                  ? `${themeClasses.borderFocus} ${themeClasses.bgTertiary}`
-                  : `${themeClasses.borderSecondary} ${themeClasses.bgCard} hover:${themeClasses.bgTertiary}`
-              }`}
-            >
-              <div className={`font-medium ${themeClasses.textPrimary} mb-1`}>
-                {displayName}
-              </div>
-              <div
-                className={`text-sm ${themeClasses.textSecondary}`}
-                style={{
-                  fontFamily: family === 'inter' ? 'Inter' : family === 'system' ? 'system-ui' : family === 'mono' ? 'monospace' : 'serif'
-                }}
+          {Object.entries(fontFamilyDisplayNames).map(
+            ([family, displayName]) => (
+              <button
+                className={`p-4 rounded-lg border text-left transition-all ${
+                  fontPreferences.family === family
+                    ? `${themeClasses.borderFocus} ${themeClasses.bgTertiary}`
+                    : `${themeClasses.borderSecondary} ${themeClasses.bgCard} hover:${themeClasses.bgTertiary}`
+                }`}
+                key={family}
+                onClick={() => setFontFamily(family as FontFamily)}
               >
-                The quick brown fox jumps over the lazy dog
-              </div>
-            </button>
-          ))}
+                <div className={`font-medium ${themeClasses.textPrimary} mb-1`}>
+                  {displayName}
+                </div>
+                <div
+                  className={`text-sm ${themeClasses.textSecondary}`}
+                  style={{
+                    fontFamily:
+                      family === 'inter'
+                        ? 'Inter'
+                        : family === 'system'
+                          ? 'system-ui'
+                          : family === 'mono'
+                            ? 'monospace'
+                            : 'serif',
+                  }}
+                >
+                  The quick brown fox jumps over the lazy dog
+                </div>
+              </button>
+            )
+          )}
         </div>
       </div>
     </div>
@@ -142,9 +190,17 @@ export function Settings() {
   const renderGeneralSection = () => (
     <div className="space-y-6">
       <div>
-        <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}>General Settings</h3>
-        <div className={`${themeClasses.bgCard} border ${themeClasses.borderSecondary} rounded-lg p-4`}>
-          <p className={themeClasses.textSecondary}>General settings coming soon...</p>
+        <h3
+          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
+        >
+          General Settings
+        </h3>
+        <div
+          className={`${themeClasses.bgCard} border ${themeClasses.borderSecondary} rounded-lg p-4`}
+        >
+          <p className={themeClasses.textSecondary}>
+            General settings coming soon...
+          </p>
         </div>
       </div>
     </div>
@@ -166,20 +222,24 @@ export function Settings() {
   return (
     <div className={`flex h-full ${themeClasses.bgPrimary}`}>
       {/* Sidebar */}
-      <div className={`w-64 ${themeClasses.bgSecondary} border-r ${themeClasses.borderPrimary} p-4`}>
-        <h2 className={`text-xl font-bold ${themeClasses.textPrimary} mb-6`}>Settings</h2>
+      <div
+        className={`w-64 ${themeClasses.bgSecondary} border-r ${themeClasses.borderPrimary} p-4`}
+      >
+        <h2 className={`text-xl font-bold ${themeClasses.textPrimary} mb-6`}>
+          Settings
+        </h2>
         <nav className="space-y-2">
-          {sidebarItems.map((item) => {
+          {sidebarItems.map(item => {
             const Icon = item.icon
             return (
               <button
-                key={item.id}
-                onClick={() => setActiveSection(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left ${
                   activeSection === item.id
                     ? `${themeClasses.bgTertiary} ${themeClasses.textAccent}`
                     : `${themeClasses.textSecondary} hover:${themeClasses.bgTertiary} hover:${themeClasses.textPrimary}`
                 }`}
+                key={item.id}
+                onClick={() => setActiveSection(item.id)}
               >
                 <Icon className="w-5 h-5" />
                 <span className="font-medium">{item.label}</span>
@@ -190,9 +250,7 @@ export function Settings() {
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 p-6">
-        {renderContent()}
-      </div>
+      <div className="flex-1 p-6">{renderContent()}</div>
     </div>
   )
 }

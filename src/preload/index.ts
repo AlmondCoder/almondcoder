@@ -34,14 +34,20 @@ const API = {
     ipcRenderer.invoke('clone-repository', repoUrl),
   executeCommand: (command: string) =>
     ipcRenderer.invoke('execute-command', command),
-  executeCommandStream: (command: string, onOutput?: (data: {type: string, data: string}) => void) => {
+  executeCommandStream: (
+    command: string,
+    onOutput?: (data: { type: string; data: string }) => void
+  ) => {
     if (onOutput) {
-      const handler = (event: any, data: {type: string, data: string}) => onOutput(data)
+      const handler = (event: any, data: { type: string; data: string }) =>
+        onOutput(data)
       ipcRenderer.on('command-output', handler)
 
-      return ipcRenderer.invoke('execute-command-stream', command).finally(() => {
-        ipcRenderer.removeListener('command-output', handler)
-      })
+      return ipcRenderer
+        .invoke('execute-command-stream', command)
+        .finally(() => {
+          ipcRenderer.removeListener('command-output', handler)
+        })
     }
     return ipcRenderer.invoke('execute-command-stream', command)
   },
@@ -49,10 +55,12 @@ const API = {
     ipcRenderer.invoke('get-project-files', projectPath),
   checkClaudeInstallation: () =>
     ipcRenderer.invoke('check-claude-installation'),
-  installClaude: () =>
-    ipcRenderer.invoke('install-claude'),
-  setupClaudePath: () =>
-    ipcRenderer.invoke('setup-claude-path'),
+  installClaude: () => ipcRenderer.invoke('install-claude'),
+  setupClaudePath: () => ipcRenderer.invoke('setup-claude-path'),
+  getProjectPromptHistory: (projectPath: string) =>
+    ipcRenderer.invoke('get-project-prompt-history', projectPath),
+  saveProjectPromptHistory: (projectPath: string, prompts: any[]) =>
+    ipcRenderer.invoke('save-project-prompt-history', projectPath, prompts),
 }
 
 contextBridge.exposeInMainWorld('App', API)

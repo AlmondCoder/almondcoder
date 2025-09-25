@@ -1,9 +1,17 @@
 import { app, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { exec, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createHash } from 'node:crypto'
 
 import { makeAppWithSingleInstanceLock } from 'lib/electron-app/factories/app/instance'
 import { makeAppSetup } from 'lib/electron-app/factories/app/setup'
@@ -39,6 +47,49 @@ const saveRecentProjects = (projects: any[]) => {
     writeFileSync(filePath, JSON.stringify(projects, null, 2))
   } catch (error) {
     console.error('Error saving recent projects:', error)
+  }
+}
+
+// Prompt history storage functions
+const getProjectPromptHistoryPath = (projectPath: string) => {
+  const appDataPath = join(homedir(), '.almondcoder')
+  if (!existsSync(appDataPath)) {
+    mkdirSync(appDataPath, { recursive: true })
+  }
+
+  // Create prompts directory
+  const promptsDir = join(appDataPath, 'project-prompts')
+  if (!existsSync(promptsDir)) {
+    mkdirSync(promptsDir, { recursive: true })
+  }
+
+  // Create a hash of the project path for filename
+  const pathHash = createHash('sha256')
+    .update(projectPath)
+    .digest('hex')
+    .substring(0, 16)
+  return join(promptsDir, `${pathHash}.json`)
+}
+
+const loadProjectPromptHistory = (projectPath: string) => {
+  try {
+    const filePath = getProjectPromptHistoryPath(projectPath)
+    if (existsSync(filePath)) {
+      const data = readFileSync(filePath, 'utf8')
+      return JSON.parse(data)
+    }
+  } catch (error) {
+    console.error('Error loading project prompt history:', error)
+  }
+  return []
+}
+
+const saveProjectPromptHistory = (projectPath: string, prompts: any[]) => {
+  try {
+    const filePath = getProjectPromptHistoryPath(projectPath)
+    writeFileSync(filePath, JSON.stringify(prompts, null, 2))
+  } catch (error) {
+    console.error('Error saving project prompt history:', error)
   }
 }
 
@@ -79,6 +130,16 @@ ipcMain.handle('add-recent-project', (event, project) => {
 
   saveRecentProjects(limitedProjects)
   return limitedProjects
+})
+
+// Prompt history IPC handlers
+ipcMain.handle('get-project-prompt-history', (event, projectPath) => {
+  return loadProjectPromptHistory(projectPath)
+})
+
+ipcMain.handle('save-project-prompt-history', (event, projectPath, prompts) => {
+  saveProjectPromptHistory(projectPath, prompts)
+  return true
 })
 
 // Git-related IPC handlers
@@ -409,29 +470,33 @@ ipcMain.handle('execute-command-stream', async (event, command) => {
     let stdout = ''
     let stderr = ''
 
-    childProcess.stdout?.on('data', (data) => {
+    childProcess.stdout?.on('data', data => {
       const chunk = data.toString()
       stdout += chunk
       // Send real-time data to renderer
       event.sender.send('command-output', { type: 'stdout', data: chunk })
     })
 
-    childProcess.stderr?.on('data', (data) => {
+    childProcess.stderr?.on('data', data => {
       const chunk = data.toString()
       stderr += chunk
       // Send real-time data to renderer
       event.sender.send('command-output', { type: 'stderr', data: chunk })
     })
 
-    childProcess.on('close', (code) => {
+    childProcess.on('close', code => {
       if (code === 0) {
         resolve(stdout + (stderr ? '\n' + stderr : ''))
       } else {
-        reject(new Error(`Command failed with code ${code}: ${stderr || 'Unknown error'}`))
+        reject(
+          new Error(
+            `Command failed with code ${code}: ${stderr || 'Unknown error'}`
+          )
+        )
       }
     })
 
-    childProcess.on('error', (error) => {
+    childProcess.on('error', error => {
       reject(new Error(`Command failed: ${error.message}`))
     })
 
@@ -459,7 +524,8 @@ ipcMain.handle('execute-command', async (event, command) => {
     console.error('Error executing command:', error)
 
     // Include both stdout and stderr even on error, as Claude might still provide useful output
-    const output = (error.stdout || '') + (error.stderr ? '\n' + error.stderr : '')
+    const output =
+      (error.stdout || '') + (error.stderr ? '\n' + error.stderr : '')
     if (output.trim()) {
       return output
     }
@@ -477,7 +543,16 @@ ipcMain.handle('get-project-files', async (event, projectPath) => {
 
       for (const item of items) {
         // Skip common directories to avoid
-        if (['.git', 'node_modules', '.DS_Store', 'dist', 'build', 'coverage'].includes(item)) {
+        if (
+          [
+            '.git',
+            'node_modules',
+            '.DS_Store',
+            'dist',
+            'build',
+            'coverage',
+          ].includes(item)
+        ) {
           continue
         }
 
@@ -494,14 +569,47 @@ ipcMain.handle('get-project-files', async (event, projectPath) => {
           } else if (stat.isFile()) {
             // Only include common code file extensions
             const ext = item.split('.').pop()?.toLowerCase()
-            if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'go', 'rs', 'cpp', 'c', 'h', 'cs', 'php', 'rb', 'swift', 'kt', 'scala', 'dart', 'vue', 'svelte', 'html', 'css', 'scss', 'less', 'json', 'yaml', 'yml', 'toml', 'md', 'txt', 'sql', 'sh', 'bat'].includes(ext || '')) {
+            if (
+              [
+                'js',
+                'ts',
+                'jsx',
+                'tsx',
+                'py',
+                'java',
+                'go',
+                'rs',
+                'cpp',
+                'c',
+                'h',
+                'cs',
+                'php',
+                'rb',
+                'swift',
+                'kt',
+                'scala',
+                'dart',
+                'vue',
+                'svelte',
+                'html',
+                'css',
+                'scss',
+                'less',
+                'json',
+                'yaml',
+                'yml',
+                'toml',
+                'md',
+                'txt',
+                'sql',
+                'sh',
+                'bat',
+              ].includes(ext || '')
+            ) {
               files.push(itemRelativePath)
             }
           }
-        } catch (error) {
-          // Skip files we can't read
-          continue
-        }
+        } catch (error) {}
       }
 
       return files
@@ -543,19 +651,19 @@ ipcMain.handle('install-claude', async () => {
     const installCommand = 'curl -fsSL https://claude.ai/install.sh | bash'
     const { stdout, stderr } = await execAsync(installCommand, {
       timeout: 120000, // 2 minutes timeout
-      env: { ...process.env }
+      env: { ...process.env },
     })
 
     return {
       success: true,
-      output: stdout + (stderr ? '\n' + stderr : '')
+      output: stdout + (stderr ? '\n' + stderr : ''),
     }
   } catch (error: any) {
     console.error('Error installing Claude:', error)
     return {
       success: false,
       error: error.message,
-      output: (error.stdout || '') + (error.stderr ? '\n' + error.stderr : '')
+      output: (error.stdout || '') + (error.stderr ? '\n' + error.stderr : ''),
     }
   }
 })
@@ -564,37 +672,40 @@ ipcMain.handle('install-claude', async () => {
 ipcMain.handle('setup-claude-path', async () => {
   try {
     // Add ~/.local/bin to PATH in shell configuration
-    const setupCommand = 'echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.zshrc && source ~/.zshrc'
+    const setupCommand =
+      'echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.zshrc && source ~/.zshrc'
     const { stdout, stderr } = await execAsync(setupCommand, {
       timeout: 30000, // 30 seconds timeout
-      shell: '/bin/zsh'
+      shell: '/bin/zsh',
     })
 
     return {
       success: true,
-      output: stdout + (stderr ? '\n' + stderr : '')
+      output: stdout + (stderr ? '\n' + stderr : ''),
     }
   } catch (error: any) {
     console.error('Error setting up Claude PATH:', error)
 
     // Try with bash if zsh fails
     try {
-      const bashSetupCommand = 'echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.bash_profile && source ~/.bash_profile'
+      const bashSetupCommand =
+        'echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.bash_profile && source ~/.bash_profile'
       const { stdout, stderr } = await execAsync(bashSetupCommand, {
         timeout: 30000,
-        shell: '/bin/bash'
+        shell: '/bin/bash',
       })
 
       return {
         success: true,
         output: stdout + (stderr ? '\n' + stderr : ''),
-        shell: 'bash'
+        shell: 'bash',
       }
     } catch (bashError: any) {
       return {
         success: false,
         error: error.message,
-        output: (error.stdout || '') + (error.stderr ? '\n' + error.stderr : '')
+        output:
+          (error.stdout || '') + (error.stderr ? '\n' + error.stderr : ''),
       }
     }
   }

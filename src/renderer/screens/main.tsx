@@ -164,7 +164,9 @@ export function MainScreen() {
       <div className="w-1/2 p-12">
         {/* Header */}
         <div className="mb-12">
-          <h1 className={`text-5xl font-light ${themeClasses.textPrimary} mb-4`}>
+          <h1
+            className={`text-5xl font-light ${themeClasses.textPrimary} mb-4`}
+          >
             Almond Coder
           </h1>
           <p className={`text-lg ${themeClasses.textSecondary}`}>
@@ -174,7 +176,11 @@ export function MainScreen() {
 
         {/* Start Section */}
         <div className="mb-10">
-          <h2 className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}>Start</h2>
+          <h2
+            className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}
+          >
+            Start
+          </h2>
           <div className="space-y-4">
             <button
               className={`flex items-center gap-3 ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
@@ -195,9 +201,15 @@ export function MainScreen() {
 
         {/* Recent Section */}
         <div>
-          <h2 className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}>Recent</h2>
+          <h2
+            className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}
+          >
+            Recent
+          </h2>
           {isLoading ? (
-            <div className={themeClasses.textSecondary}>Loading recent projects...</div>
+            <div className={themeClasses.textSecondary}>
+              Loading recent projects...
+            </div>
           ) : recentProjects.length > 0 ? (
             <div className="space-y-2">
               {recentProjects.map(project => (
@@ -216,28 +228,38 @@ export function MainScreen() {
               ))}
             </div>
           ) : (
-            <div className={`${themeClasses.textMuted} text-base`}>No recent projects</div>
+            <div className={`${themeClasses.textMuted} text-base`}>
+              No recent projects
+            </div>
           )}
         </div>
       </div>
 
       {/* Right Side - Configuration */}
-      <div className={`w-1/2 ${themeClasses.bgSecondary} p-12 border-l ${themeClasses.borderPrimary}`}>
+      <div
+        className={`w-1/2 ${themeClasses.bgSecondary} p-12 border-l ${themeClasses.borderPrimary}`}
+      >
         <div className="max-w-md">
-          <h2 className={`text-2xl font-normal ${themeClasses.textPrimary} mb-8`}>
+          <h2
+            className={`text-2xl font-normal ${themeClasses.textPrimary} mb-8`}
+          >
             Configure Project
           </h2>
 
           {/* Selected Path Display */}
           {repoPath && (
-            <div className={`mb-6 p-4 ${themeClasses.bgTertiary} rounded-lg border ${themeClasses.borderSecondary}`}>
+            <div
+              className={`mb-6 p-4 ${themeClasses.bgTertiary} rounded-lg border ${themeClasses.borderSecondary}`}
+            >
               <div className={`text-sm ${themeClasses.textSecondary} mb-1`}>
                 Selected Repository
               </div>
               <div className={`${themeClasses.textPrimary} font-medium`}>
                 {repoPath.split('/').pop()}
               </div>
-              <div className={`text-xs ${themeClasses.textMuted} mt-1`}>{repoPath}</div>
+              <div className={`text-xs ${themeClasses.textMuted} mt-1`}>
+                {repoPath}
+              </div>
             </div>
           )}
 

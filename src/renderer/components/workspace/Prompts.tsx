@@ -27,6 +27,13 @@ declare global {
         error?: string
         shell?: string
       }>
+      getProjectPromptHistory: (
+        projectPath: string
+      ) => Promise<PromptHistoryItem[]>
+      saveProjectPromptHistory: (
+        projectPath: string,
+        prompts: PromptHistoryItem[]
+      ) => Promise<boolean>
     }
   }
 }
@@ -93,34 +100,32 @@ export function Prompts({ projectContext }: PromptsProps) {
 
   // Prompt pills data
   const promptPills = [
-    { label: 'Tailwind Frontend', text: 'I need help with frontend development using Tailwind CSS. Please act as an expert frontend developer.' },
-    { label: 'Backend API', text: 'I need help with backend API development. Please act as an expert backend developer.' },
-    { label: 'React Component', text: 'I need help creating a React component. Please act as an expert React developer.' },
-    { label: 'Database Design', text: 'I need help with database design and optimization. Please act as a database expert.' },
-    { label: 'Bug Fix', text: 'I have a bug that needs fixing. Please help me debug and resolve this issue.' },
+    {
+      label: 'Tailwind Frontend',
+      text: 'I need help with frontend development using Tailwind CSS. Please act as an expert frontend developer.',
+    },
+    {
+      label: 'Backend API',
+      text: 'I need help with backend API development. Please act as an expert backend developer.',
+    },
+    {
+      label: 'React Component',
+      text: 'I need help creating a React component. Please act as an expert React developer.',
+    },
+    {
+      label: 'Database Design',
+      text: 'I need help with database design and optimization. Please act as a database expert.',
+    },
+    {
+      label: 'Bug Fix',
+      text: 'I have a bug that needs fixing. Please help me debug and resolve this issue.',
+    },
   ]
 
-  // Mock data for prompt history
-  const promptHistory: PromptHistoryItem[] = [
-    {
-      id: '1',
-      text: 'Create a new user authentication system with JWT tokens and password hashing',
-      status: 'old',
-      timestamp: new Date('2024-01-15'),
-    },
-    {
-      id: '2',
-      text: 'Fix the API endpoint that handles file uploads',
-      status: 'completed',
-      timestamp: new Date('2024-01-16'),
-    },
-    {
-      id: '3',
-      text: 'Implement real-time notifications using WebSocket connections and handle reconnection logic',
-      status: 'busy',
-      timestamp: new Date('2024-01-17'),
-    },
-  ]
+  const [promptHistory, setPromptHistory] = useState<PromptHistoryItem[]>([])
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(
+    '+new'
+  )
 
   // Check Claude installation on component mount
   useEffect(() => {
@@ -187,6 +192,27 @@ export function Prompts({ projectContext }: PromptsProps) {
     }
 
     loadProjectFiles()
+  }, [projectContext?.projectPath])
+
+  // Load prompt history when project changes
+  useEffect(() => {
+    const loadPromptHistory = async () => {
+      if (projectContext?.projectPath) {
+        try {
+          const history = await window.App.getProjectPromptHistory(
+            projectContext.projectPath
+          )
+          setPromptHistory(history)
+        } catch (error) {
+          console.error('Error loading prompt history:', error)
+          setPromptHistory([])
+        }
+      } else {
+        setPromptHistory([])
+      }
+    }
+
+    loadPromptHistory()
   }, [projectContext?.projectPath])
 
   const getStatusColor = (status: PromptStatus) => {
@@ -278,6 +304,52 @@ export function Prompts({ projectContext }: PromptsProps) {
     setStreamingMessageId(null)
   }
 
+  const savePromptToHistory = async (
+    promptText: string,
+    status: PromptStatus = 'busy'
+  ): Promise<string | null> => {
+    if (!projectContext?.projectPath) return null
+
+    const newPrompt: PromptHistoryItem = {
+      id: Date.now().toString(),
+      text: promptText,
+      status,
+      timestamp: new Date(),
+    }
+
+    const updatedHistory = [newPrompt, ...promptHistory]
+    setPromptHistory(updatedHistory)
+
+    try {
+      await window.App.saveProjectPromptHistory(
+        projectContext.projectPath,
+        updatedHistory
+      )
+      return newPrompt.id
+    } catch (error) {
+      console.error('Error saving prompt history:', error)
+      return null
+    }
+  }
+
+  const updatePromptStatus = async (promptId: string, status: PromptStatus) => {
+    if (!projectContext?.projectPath) return
+
+    const updatedHistory = promptHistory.map(prompt =>
+      prompt.id === promptId ? { ...prompt, status } : prompt
+    )
+    setPromptHistory(updatedHistory)
+
+    try {
+      await window.App.saveProjectPromptHistory(
+        projectContext.projectPath,
+        updatedHistory
+      )
+    } catch (error) {
+      console.error('Error updating prompt history:', error)
+    }
+  }
+
   const handlePillClick = (index: number, text: string) => {
     const newActivePills = new Set(activePills)
 
@@ -295,14 +367,15 @@ export function Prompts({ projectContext }: PromptsProps) {
         if (prev.trim()) {
           // If there's already text, append with a space
           return prev + (prev.endsWith(' ') ? '' : ' ') + text
-        } else {
-          // If empty, set the text directly
-          return text
         }
+        // If empty, set the text directly
+        return text
       })
     }
 
     setActivePills(newActivePills)
+    // Set to New Prompt when user makes changes
+    setSelectedPromptId('+new')
   }
 
   const installClaudeIfNeeded = async () => {
@@ -378,6 +451,9 @@ export function Prompts({ projectContext }: PromptsProps) {
     setIsExecuting(true)
     setInputMode('compact')
 
+    // Save prompt to history
+    const promptId = await savePromptToHistory(currentPrompt, 'busy')
+
     // Add user message
     addChatMessage(currentPrompt, 'user')
 
@@ -385,6 +461,7 @@ export function Prompts({ projectContext }: PromptsProps) {
     const claudeReady = await installClaudeIfNeeded()
     if (!claudeReady) {
       setIsExecuting(false)
+      if (promptId) updatePromptStatus(promptId, 'old')
       return
     }
 
@@ -419,6 +496,9 @@ export function Prompts({ projectContext }: PromptsProps) {
         // Finalize the streaming message
         finalizeStreamingMessage(messageId)
 
+        // Update prompt status to completed
+        if (promptId) updatePromptStatus(promptId, 'completed')
+
         // If no output was streamed, show a message
         const finalMessage = chatMessages.find(msg => msg.id === messageId)
         if (!finalMessage?.content.trim()) {
@@ -432,6 +512,7 @@ export function Prompts({ projectContext }: PromptsProps) {
         // Handle streaming errors
         updateStreamingMessage(messageId, `Error: ${streamError}`)
         finalizeStreamingMessage(messageId)
+        if (promptId) updatePromptStatus(promptId, 'old')
         throw streamError
       }
     } catch (error: any) {
@@ -439,6 +520,7 @@ export function Prompts({ projectContext }: PromptsProps) {
         `Error during planning: ${error?.message || error}`,
         'system'
       )
+      if (promptId) updatePromptStatus(promptId, 'old')
     } finally {
       setIsExecuting(false)
     }
@@ -450,6 +532,9 @@ export function Prompts({ projectContext }: PromptsProps) {
     setIsExecuting(true)
     setInputMode('compact')
 
+    // Save prompt to history
+    const promptId = await savePromptToHistory(currentPrompt, 'busy')
+
     // Add user message
     addChatMessage(currentPrompt, 'user')
 
@@ -457,6 +542,7 @@ export function Prompts({ projectContext }: PromptsProps) {
     const claudeReady = await installClaudeIfNeeded()
     if (!claudeReady) {
       setIsExecuting(false)
+      if (promptId) updatePromptStatus(promptId, 'old')
       return
     }
 
@@ -517,6 +603,9 @@ export function Prompts({ projectContext }: PromptsProps) {
         // Finalize the streaming message
         finalizeStreamingMessage(messageId)
 
+        // Update prompt status to completed
+        if (promptId) updatePromptStatus(promptId, 'completed')
+
         // If no output was streamed, show a message
         const finalMessage = chatMessages.find(msg => msg.id === messageId)
         if (!finalMessage?.content.trim()) {
@@ -530,33 +619,71 @@ export function Prompts({ projectContext }: PromptsProps) {
         // Handle streaming errors
         updateStreamingMessage(messageId, `Error: ${error}`)
         finalizeStreamingMessage(messageId)
+        if (promptId) updatePromptStatus(promptId, 'old')
         throw error
       }
 
       // Clear the prompt after successful execution
       setCurrentPrompt('')
+      setSelectedPromptId('+new')
     } catch (error: any) {
       addChatMessage(`Error: ${error?.message || error}`, 'system')
+      if (promptId) updatePromptStatus(promptId, 'old')
     } finally {
       setIsExecuting(false)
     }
   }
 
   return (
-    <div className={`flex h-full ${themeClasses.bgPrimary} ${themeClasses.textPrimary}`}>
+    <div
+      className={`flex h-full ${themeClasses.bgPrimary} ${themeClasses.textPrimary}`}
+    >
       {/* First Section - Prompt History (20% width) */}
-      <div className={`w-1/5 border-r ${themeClasses.borderPrimary} p-4 overflow-y-auto`}>
-        <h3 className={`text-lg font-semibold mb-4 ${themeClasses.textPrimary}`}>Prompt History</h3>
+      <div
+        className={`w-1/5 border-r ${themeClasses.borderPrimary} p-4 overflow-y-auto`}
+      >
+        <h3
+          className={`text-lg font-semibold mb-4 ${themeClasses.textPrimary}`}
+        >
+          Prompt History
+        </h3>
         <div className="space-y-3">
+          {/* +New Prompt Option */}
+          <div
+            className={`${selectedPromptId === '+new' ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${selectedPromptId === '+new' ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors`}
+            onClick={() => {
+              setSelectedPromptId('+new')
+              setCurrentPrompt('')
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />
+              <span
+                className={`text-sm font-medium ${themeClasses.textPrimary}`}
+              >
+                + New Prompt
+              </span>
+            </div>
+          </div>
+
+          {/* Existing Prompts */}
           {promptHistory.map(prompt => {
             const isExpanded = expandedPrompts.has(prompt.id)
+            const isSelected = selectedPromptId === prompt.id
             const displayText = isExpanded
               ? prompt.text
               : truncatePrompt(prompt.text)
             const needsTruncation = prompt.text.split(' ').length > 20
 
             return (
-              <div className={`${themeClasses.bgSecondary} rounded-lg p-3`} key={prompt.id}>
+              <div
+                className={`${isSelected ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${isSelected ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors`}
+                key={prompt.id}
+                onClick={() => {
+                  setSelectedPromptId(prompt.id)
+                  setCurrentPrompt(prompt.text)
+                }}
+              >
                 <div className="flex items-start justify-between mb-2">
                   <div
                     className={`w-2 h-2 rounded-full ${getStatusColor(prompt.status)} mt-1 flex-shrink-0`}
@@ -567,14 +694,18 @@ export function Prompts({ projectContext }: PromptsProps) {
                 </div>
                 <p
                   className={`text-sm ${themeClasses.textSecondary} ${needsTruncation ? `cursor-pointer hover:${themeClasses.textPrimary}` : ''}`}
-                  onClick={() =>
-                    needsTruncation && togglePromptExpansion(prompt.id)
-                  }
+                  onClick={e => {
+                    if (needsTruncation) {
+                      e.stopPropagation()
+                      togglePromptExpansion(prompt.id)
+                    }
+                  }}
                   onKeyDown={e => {
                     if (
                       needsTruncation &&
                       (e.key === 'Enter' || e.key === ' ')
                     ) {
+                      e.stopPropagation()
                       togglePromptExpansion(prompt.id)
                     }
                   }}
@@ -591,21 +722,33 @@ export function Prompts({ projectContext }: PromptsProps) {
 
       {/* Second Section - Input Area (45% width) */}
       <div className="w-4/5 p-6 flex flex-col">
-        <h3 className={`text-lg font-semibold mb-4 ${themeClasses.textPrimary}`}>New Prompt</h3>
+        <h3
+          className={`text-lg font-semibold mb-4 ${themeClasses.textPrimary}`}
+        >
+          {selectedPromptId === '+new' ? 'New Prompt' : 'Selected Prompt'}
+        </h3>
         {chatMessages.length === 0 && (
-          <div className={`mb-6 ${themeClasses.bgCard} border ${themeClasses.borderPrimary} rounded-lg p-6`}>
-            <h1 className={`text-2xl font-bold ${themeClasses.textPrimary} mb-4 border-b ${themeClasses.borderSecondary} pb-2`}>
+          <div
+            className={`mb-6 ${themeClasses.bgCard} border ${themeClasses.borderPrimary} rounded-lg p-6`}
+          >
+            <h1
+              className={`text-2xl font-bold ${themeClasses.textPrimary} mb-4 border-b ${themeClasses.borderSecondary} pb-2`}
+            >
               Welcome to AlmondCoder
             </h1>
 
             <div className="prose prose-invert max-w-none">
-              <p className={`${themeClasses.textSecondary} mb-4 leading-relaxed`}>
+              <p
+                className={`${themeClasses.textSecondary} mb-4 leading-relaxed`}
+              >
                 Type your coding instructions in the box below. Click on{' '}
                 <strong>Plan</strong> to think through the implementation, which
                 you can later edit, before executing the plan.
               </p>
 
-              <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mt-4 mb-2`}>
+              <h3
+                className={`text-lg font-semibold ${themeClasses.textPrimary} mt-4 mb-2`}
+              >
                 Getting Started
               </h3>
               <ul className={`${themeClasses.textSecondary} space-y-1 ml-4`}>
@@ -614,36 +757,79 @@ export function Prompts({ projectContext }: PromptsProps) {
                 </li>
                 <li>
                   • Click{' '}
-                  <code className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-sm ${themeClasses.textAccent}`}>
+                  <code
+                    className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-sm ${themeClasses.textAccent}`}
+                  >
                     Plan
                   </code>{' '}
                   to preview the implementation strategy
                 </li>
                 <li>
                   • Click{' '}
-                  <code className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-sm text-green-400`}>
+                  <code
+                    className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-sm text-green-400`}
+                  >
                     Execute
                   </code>{' '}
                   to run the changes
                 </li>
               </ul>
 
-              <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mt-4 mb-2`}>
+              <h3
+                className={`text-lg font-semibold ${themeClasses.textPrimary} mt-4 mb-2`}
+              >
                 Prompt Pills
               </h3>
-              <p className={`${themeClasses.textSecondary} mb-3 leading-relaxed`}>
-                Quick templates above the input box for common development tasks.
+              <p
+                className={`${themeClasses.textSecondary} mb-3 leading-relaxed`}
+              >
+                Quick templates above the input box for common development
+                tasks.
               </p>
 
-              <h4 className={`text-sm font-medium ${themeClasses.textPrimary} mb-2`}>Examples:</h4>
-              <ul className={`${themeClasses.textSecondary} space-y-1 ml-4 mb-3`}>
-                <li>• <code className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-xs text-purple-400`}>Tailwind Frontend</code> - Frontend developer with Tailwind CSS expertise</li>
-                <li>• <code className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-xs text-purple-400`}>Backend API</code> - Backend developer for API development</li>
-                <li>• <code className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-xs text-purple-400`}>React Component</code> - React component development specialist</li>
+              <h4
+                className={`text-sm font-medium ${themeClasses.textPrimary} mb-2`}
+              >
+                Examples:
+              </h4>
+              <ul
+                className={`${themeClasses.textSecondary} space-y-1 ml-4 mb-3`}
+              >
+                <li>
+                  •{' '}
+                  <code
+                    className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-xs text-purple-400`}
+                  >
+                    Tailwind Frontend
+                  </code>{' '}
+                  - Frontend developer with Tailwind CSS expertise
+                </li>
+                <li>
+                  •{' '}
+                  <code
+                    className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-xs text-purple-400`}
+                  >
+                    Backend API
+                  </code>{' '}
+                  - Backend developer for API development
+                </li>
+                <li>
+                  •{' '}
+                  <code
+                    className={`${themeClasses.bgTertiary} px-1 py-0.5 rounded text-xs text-purple-400`}
+                  >
+                    React Component
+                  </code>{' '}
+                  - React component development specialist
+                </li>
               </ul>
 
-              <blockquote className={`border-l-4 ${themeClasses.borderSecondary} pl-4 ${themeClasses.textTertiary} italic text-sm`}>
-                <strong>Tip:</strong> Customize these prompts for your project needs. They'll be saved in your .git repository for team collaboration.
+              <blockquote
+                className={`border-l-4 ${themeClasses.borderSecondary} pl-4 ${themeClasses.textTertiary} italic text-sm`}
+              >
+                <strong>Tip:</strong> Customize these prompts for your project
+                needs. They'll be saved in your .git repository for team
+                collaboration.
               </blockquote>
             </div>
           </div>
@@ -731,18 +917,20 @@ export function Prompts({ projectContext }: PromptsProps) {
                 const isActive = activePills.has(index)
                 return (
                   <button
-                    key={index}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border ${
                       isActive
                         ? themeClasses.pillActive
                         : themeClasses.pillInactive
                     }`}
-                    onClick={() => handlePillClick(index, pill.text)}
                     disabled={isExecuting}
+                    key={index}
+                    onClick={() => handlePillClick(index, pill.text)}
                   >
                     <span
                       className={`w-2 h-2 rounded-full transition-colors ${
-                        isActive ? themeClasses.pillActiveDot : themeClasses.pillInactiveDot
+                        isActive
+                          ? themeClasses.pillActiveDot
+                          : themeClasses.pillInactiveDot
                       }`}
                     ></span>
                     {pill.label}
@@ -756,7 +944,13 @@ export function Prompts({ projectContext }: PromptsProps) {
           <div className="relative">
             <textarea
               className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-4 pr-32 ${themeClasses.textPrimary} placeholder-gray-400 resize-none focus:outline-none ${themeClasses.borderFocus} h-20 min-h-[80px] w-full`}
-              onChange={e => setCurrentPrompt(e.target.value)}
+              onChange={e => {
+                setCurrentPrompt(e.target.value)
+                // Set to New Prompt when user types
+                if (selectedPromptId !== '+new') {
+                  setSelectedPromptId('+new')
+                }
+              }}
               placeholder="Enter your prompt here..."
               value={currentPrompt}
             />

@@ -97,9 +97,13 @@ export function WorkspaceScreen() {
   }
 
   return (
-    <div className={`h-screen ${themeClasses.bgPrimary} ${themeClasses.textPrimary} flex flex-col`}>
+    <div
+      className={`h-screen ${themeClasses.bgPrimary} ${themeClasses.textPrimary} flex flex-col`}
+    >
       {/* Top Horizontal Menu */}
-      <div className={`${themeClasses.bgSecondary} border-b ${themeClasses.borderPrimary} px-4 py-2`}>
+      <div
+        className={`${themeClasses.bgSecondary} border-b ${themeClasses.borderPrimary} px-4 py-2`}
+      >
         <div className="flex items-center justify-between">
           {/* Left side menu items */}
           <div className="flex items-center space-x-1">
@@ -121,7 +125,9 @@ export function WorkspaceScreen() {
 
           {/* Center - App title */}
           <div className="text-center">
-            <h1 className={`text-lg font-semibold ${themeClasses.textPrimary}`}>AlmondCoder</h1>
+            <h1 className={`text-lg font-semibold ${themeClasses.textPrimary}`}>
+              AlmondCoder
+            </h1>
           </div>
 
           {/* Right side menu items */}
