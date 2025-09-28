@@ -16,3 +16,45 @@ export interface WindowCreationByIPC {
   window(): BrowserWindowOrNull
   callback(window: BrowserWindow, event: IpcMainInvokeEvent): void
 }
+
+// Enhanced Prompt Tracking Types
+export type PromptStatus = 'busy' | 'completed' | 'old'
+export type BranchStatus = 'active' | 'deleted'
+
+export interface ConversationMessage {
+  id: string
+  content: string
+  type: 'user' | 'system' | 'assistant'
+  timestamp: Date
+  isStreaming?: boolean
+}
+
+export interface ConversationHistory {
+  promptId: string
+  projectPath: string
+  messages: ConversationMessage[]
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface EnhancedPromptHistoryItem {
+  id: string
+  prompt: string
+  startExecutionTime: Date
+  endExecutionTime: Date | null
+  branch: string
+  branchStatus: BranchStatus
+  promptHistoryId: string
+  status: PromptStatus
+  projectPath: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface ProjectMetadata {
+  projectName: string
+  projectPath: string
+  createdAt: Date
+  lastUsed: Date
+  totalPrompts: number
+}

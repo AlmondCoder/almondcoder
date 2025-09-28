@@ -1,5 +1,5 @@
 import { app, dialog, ipcMain } from 'electron'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import {
   existsSync,
   readFileSync,
@@ -16,6 +16,13 @@ import { createHash } from 'node:crypto'
 import { makeAppWithSingleInstanceLock } from 'lib/electron-app/factories/app/instance'
 import { makeAppSetup } from 'lib/electron-app/factories/app/setup'
 import { MainWindow } from './windows/main'
+import type {
+  EnhancedPromptHistoryItem,
+  ConversationHistory,
+  ConversationMessage,
+  ProjectMetadata,
+  BranchStatus,
+} from '../shared/types'
 
 const execAsync = promisify(exec)
 
@@ -50,20 +57,208 @@ const saveRecentProjects = (projects: any[]) => {
   }
 }
 
-// Prompt history storage functions
+// Enhanced project folder structure functions
+const getProjectFolderPath = (projectPath: string) => {
+  const projectName = basename(projectPath)
+  const appDataPath = join(homedir(), '.almondcoder')
+  if (!existsSync(appDataPath)) {
+    mkdirSync(appDataPath, { recursive: true })
+  }
+  return join(appDataPath, projectName)
+}
+
+const ensureProjectFolderStructure = (projectPath: string) => {
+  const projectFolderPath = getProjectFolderPath(projectPath)
+  const promptsDir = join(projectFolderPath, 'prompts')
+  const conversationsDir = join(promptsDir, 'conversations')
+
+  if (!existsSync(projectFolderPath)) {
+    mkdirSync(projectFolderPath, { recursive: true })
+  }
+  if (!existsSync(promptsDir)) {
+    mkdirSync(promptsDir, { recursive: true })
+  }
+  if (!existsSync(conversationsDir)) {
+    mkdirSync(conversationsDir, { recursive: true })
+  }
+
+  return { projectFolderPath, promptsDir, conversationsDir }
+}
+
+const getProjectMetadataPath = (projectPath: string) => {
+  const { projectFolderPath } = ensureProjectFolderStructure(projectPath)
+  return join(projectFolderPath, 'project-info.json')
+}
+
+const loadProjectMetadata = (projectPath: string): ProjectMetadata | null => {
+  try {
+    const filePath = getProjectMetadataPath(projectPath)
+    if (existsSync(filePath)) {
+      const data = readFileSync(filePath, 'utf8')
+      const parsed = JSON.parse(data)
+      return {
+        ...parsed,
+        createdAt: new Date(parsed.createdAt),
+        lastUsed: new Date(parsed.lastUsed),
+      }
+    }
+  } catch (error) {
+    console.error('Error loading project metadata:', error)
+  }
+  return null
+}
+
+const saveProjectMetadata = (
+  projectPath: string,
+  metadata: ProjectMetadata
+) => {
+  try {
+    const filePath = getProjectMetadataPath(projectPath)
+    writeFileSync(filePath, JSON.stringify(metadata, null, 2))
+  } catch (error) {
+    console.error('Error saving project metadata:', error)
+  }
+}
+
+const createOrUpdateProjectMetadata = (projectPath: string) => {
+  const projectName = basename(projectPath)
+  let metadata = loadProjectMetadata(projectPath)
+
+  if (!metadata) {
+    metadata = {
+      projectName,
+      projectPath,
+      createdAt: new Date(),
+      lastUsed: new Date(),
+      totalPrompts: 0,
+    }
+  } else {
+    metadata.lastUsed = new Date()
+  }
+
+  saveProjectMetadata(projectPath, metadata)
+  return metadata
+}
+
+const getPromptFilePath = (projectPath: string, promptId: string) => {
+  const { promptsDir } = ensureProjectFolderStructure(projectPath)
+  return join(promptsDir, `${promptId}.json`)
+}
+
+const getConversationFilePath = (projectPath: string, promptId: string) => {
+  const { conversationsDir } = ensureProjectFolderStructure(projectPath)
+  return join(conversationsDir, `${promptId}.json`)
+}
+
+const loadEnhancedPromptHistory = (
+  projectPath: string
+): EnhancedPromptHistoryItem[] => {
+  try {
+    const { promptsDir } = ensureProjectFolderStructure(projectPath)
+    const promptFiles = readdirSync(promptsDir).filter(file =>
+      file.endsWith('.json')
+    )
+
+    const prompts: EnhancedPromptHistoryItem[] = []
+    for (const file of promptFiles) {
+      try {
+        const filePath = join(promptsDir, file)
+        const data = readFileSync(filePath, 'utf8')
+        const parsed = JSON.parse(data)
+        prompts.push({
+          ...parsed,
+          startExecutionTime: new Date(parsed.startExecutionTime),
+          endExecutionTime: parsed.endExecutionTime
+            ? new Date(parsed.endExecutionTime)
+            : null,
+          createdAt: new Date(parsed.createdAt),
+          updatedAt: new Date(parsed.updatedAt),
+        })
+      } catch (error) {
+        console.error(`Error loading prompt file ${file}:`, error)
+      }
+    }
+
+    return prompts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  } catch (error) {
+    console.error('Error loading enhanced prompt history:', error)
+    return []
+  }
+}
+
+const saveEnhancedPrompt = (promptData: EnhancedPromptHistoryItem) => {
+  try {
+    const filePath = getPromptFilePath(promptData.projectPath, promptData.id)
+    writeFileSync(filePath, JSON.stringify(promptData, null, 2))
+  } catch (error) {
+    console.error('Error saving enhanced prompt:', error)
+  }
+}
+
+const loadConversationHistory = (
+  projectPath: string,
+  promptId: string
+): ConversationHistory | null => {
+  try {
+    const filePath = getConversationFilePath(projectPath, promptId)
+    if (existsSync(filePath)) {
+      const data = readFileSync(filePath, 'utf8')
+      const parsed = JSON.parse(data)
+      return {
+        ...parsed,
+        messages: parsed.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        })),
+        createdAt: new Date(parsed.createdAt),
+        updatedAt: new Date(parsed.updatedAt),
+      }
+    }
+  } catch (error) {
+    console.error('Error loading conversation history:', error)
+  }
+  return null
+}
+
+const saveConversationHistory = (conversationData: ConversationHistory) => {
+  try {
+    const filePath = getConversationFilePath(
+      conversationData.projectPath,
+      conversationData.promptId
+    )
+    writeFileSync(filePath, JSON.stringify(conversationData, null, 2))
+  } catch (error) {
+    console.error('Error saving conversation history:', error)
+  }
+}
+
+const getCurrentBranchStatus = async (
+  projectPath: string,
+  branchName: string
+): Promise<BranchStatus> => {
+  try {
+    const { stdout } = await execAsync('git branch -a', { cwd: projectPath })
+    const branches = stdout
+      .split('\n')
+      .map(b => b.replace(/^\*?\s*/, '').replace(/^remotes\/origin\//, ''))
+    return branches.includes(branchName) ? 'active' : 'deleted'
+  } catch (error) {
+    return 'active'
+  }
+}
+
+// Legacy support functions for backward compatibility
 const getProjectPromptHistoryPath = (projectPath: string) => {
   const appDataPath = join(homedir(), '.almondcoder')
   if (!existsSync(appDataPath)) {
     mkdirSync(appDataPath, { recursive: true })
   }
 
-  // Create prompts directory
   const promptsDir = join(appDataPath, 'project-prompts')
   if (!existsSync(promptsDir)) {
     mkdirSync(promptsDir, { recursive: true })
   }
 
-  // Create a hash of the project path for filename
   const pathHash = createHash('sha256')
     .update(projectPath)
     .digest('hex')
@@ -132,7 +327,77 @@ ipcMain.handle('add-recent-project', (event, project) => {
   return limitedProjects
 })
 
-// Prompt history IPC handlers
+// Enhanced Prompt history IPC handlers
+ipcMain.handle('get-enhanced-prompt-history', (event, projectPath) => {
+  ensureProjectFolderStructure(projectPath)
+  createOrUpdateProjectMetadata(projectPath)
+  return loadEnhancedPromptHistory(projectPath)
+})
+
+ipcMain.handle(
+  'save-enhanced-prompt',
+  (event, promptData: EnhancedPromptHistoryItem) => {
+    saveEnhancedPrompt(promptData)
+
+    const metadata = createOrUpdateProjectMetadata(promptData.projectPath)
+    metadata.totalPrompts += 1
+    saveProjectMetadata(promptData.projectPath, metadata)
+
+    return true
+  }
+)
+
+ipcMain.handle(
+  'update-enhanced-prompt',
+  (event, promptData: EnhancedPromptHistoryItem) => {
+    saveEnhancedPrompt(promptData)
+    return true
+  }
+)
+
+ipcMain.handle('get-conversation-history', (event, projectPath, promptId) => {
+  return loadConversationHistory(projectPath, promptId)
+})
+
+ipcMain.handle(
+  'save-conversation-history',
+  (event, conversationData: ConversationHistory) => {
+    saveConversationHistory(conversationData)
+    return true
+  }
+)
+
+ipcMain.handle(
+  'add-conversation-message',
+  (event, projectPath, promptId, message: ConversationMessage) => {
+    let conversation = loadConversationHistory(projectPath, promptId)
+
+    if (!conversation) {
+      conversation = {
+        promptId,
+        projectPath,
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+    }
+
+    conversation.messages.push(message)
+    conversation.updatedAt = new Date()
+
+    saveConversationHistory(conversation)
+    return true
+  }
+)
+
+ipcMain.handle(
+  'get-current-branch-status',
+  async (event, projectPath, branchName) => {
+    return await getCurrentBranchStatus(projectPath, branchName)
+  }
+)
+
+// Legacy Prompt history IPC handlers (for backward compatibility)
 ipcMain.handle('get-project-prompt-history', (event, projectPath) => {
   return loadProjectPromptHistory(projectPath)
 })

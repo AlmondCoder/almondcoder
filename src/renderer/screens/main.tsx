@@ -1,5 +1,5 @@
-import { Folder, ChevronDown, FileText, GitBranch } from 'lucide-react'
-import { useState, useEffect, useId } from 'react'
+import { Folder, GitBranch } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CloneRepositoryModal } from '../components/ui/clone-repository-modal'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
@@ -11,13 +11,9 @@ export function MainScreen() {
   const { theme } = useTheme()
   const themeClasses = createThemeClasses(theme)
 
-  const [repoPath, setRepoPath] = useState('')
-  const [selectedTool, setSelectedTool] = useState<
-    'claude-code' | 'gemini-cli' | 'codex'
-  >('claude-code')
-  const [branches, setBranches] = useState<string[]>([])
-  const [selectedBranch, setSelectedBranch] = useState('')
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [selectedTool] = useState<'claude-code' | 'gemini-cli' | 'codex'>(
+    'claude-code'
+  )
   const [recentProjects, setRecentProjects] = useState<
     Array<{
       name: string
@@ -28,9 +24,6 @@ export function MainScreen() {
   const [isLoading, setIsLoading] = useState(true)
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false)
   const navigate = useNavigate()
-
-  const repoPathId = useId()
-  const branchDropdownId = useId()
 
   useEffect(() => {
     App.sayHelloFromBridge()
@@ -80,16 +73,28 @@ export function MainScreen() {
           return
         }
 
-        setRepoPath(selectedPath)
         // Get actual Git branches
         const gitBranches = await App.getGitBranches(selectedPath)
-        setBranches(gitBranches)
-        setSelectedBranch(gitBranches[0] || 'main')
+        const mainBranch = gitBranches[0] || 'main'
 
         // Add to recent projects
         const projectName = selectedPath.split('/').pop() || 'Unknown Project'
         await App.addRecentProject({ name: projectName, path: selectedPath })
         await loadRecentProjects()
+
+        // Launch workspace directly
+        console.log('Launching project:', {
+          projectPath: selectedPath,
+          selectedTool,
+          selectedBranch: mainBranch,
+        })
+        navigate('/workspace', {
+          state: {
+            projectPath: selectedPath,
+            selectedTool,
+            selectedBranch: mainBranch,
+          },
+        })
       }
     } catch (error) {
       console.error('Error selecting folder:', error)
@@ -105,15 +110,27 @@ export function MainScreen() {
         return
       }
 
-      setRepoPath(project.path)
       // Get actual Git branches
       const gitBranches = await App.getGitBranches(project.path)
-      setBranches(gitBranches)
-      setSelectedBranch(gitBranches[0] || 'main')
+      const mainBranch = gitBranches[0] || 'main'
 
       // Update recent projects with new timestamp
       await App.addRecentProject({ name: project.name, path: project.path })
       await loadRecentProjects()
+
+      // Launch workspace directly
+      console.log('Launching project:', {
+        projectPath: project.path,
+        selectedTool,
+        selectedBranch: mainBranch,
+      })
+      navigate('/workspace', {
+        state: {
+          projectPath: project.path,
+          selectedTool,
+          selectedBranch: mainBranch,
+        },
+      })
     } catch (error) {
       console.error('Error selecting project:', error)
     }
@@ -127,15 +144,27 @@ export function MainScreen() {
     try {
       const clonePath = await App.cloneRepository(repoUrl)
       if (clonePath) {
-        setRepoPath(clonePath)
         const branches = await App.getGitBranches(clonePath)
-        setBranches(branches)
-        setSelectedBranch(branches[0] || 'main')
+        const mainBranch = branches[0] || 'main'
 
         const projectName =
           repoUrl.split('/').pop()?.replace('.git', '') || 'Cloned Project'
         await App.addRecentProject({ name: projectName, path: clonePath })
         await loadRecentProjects()
+
+        // Launch workspace directly
+        console.log('Launching cloned project:', {
+          projectPath: clonePath,
+          selectedTool,
+          selectedBranch: mainBranch,
+        })
+        navigate('/workspace', {
+          state: {
+            projectPath: clonePath,
+            selectedTool,
+            selectedBranch: mainBranch,
+          },
+        })
       }
     } catch (error) {
       console.error('Error cloning repository:', error)
@@ -143,204 +172,132 @@ export function MainScreen() {
     }
   }
 
-  const handleCreate = () => {
-    console.log('Creating project with:', {
-      repoPath,
-      selectedTool,
-      selectedBranch,
-    })
-    navigate('/workspace', {
-      state: {
-        projectPath: repoPath,
-        selectedTool,
-        selectedBranch,
-      },
-    })
-  }
-
   return (
-    <div className={`min-h-screen ${themeClasses.bgPrimary} flex`}>
-      {/* Left Side - VS Code Style */}
-      <div className="w-1/2 p-12">
+    <div className={`min-h-screen ${themeClasses.bgPrimary} relative`}>
+      {/* Main Content - Centered */}
+      <div className="flex flex-col items-center justify-center min-h-screen px-12">
         {/* Header */}
-        <div className="mb-12">
+        <div className="text-center mb-16 mt-10">
           <h1
-            className={`text-5xl font-light ${themeClasses.textPrimary} mb-4`}
+            className={`text-6xl font-light ${themeClasses.textPrimary} mb-6`}
           >
             Almond Coder
           </h1>
-          <p className={`text-lg ${themeClasses.textSecondary}`}>
-            Use AlmondCoder to stay ahead of the curve!
+          <p className={`text-xl ${themeClasses.textSecondary} mb-4`}>
+            Become a 100x developer with tools you already love
+          </p>
+          <p
+            className={`text-base ${themeClasses.textMuted} max-w-3xl mx-auto`}
+          >
+            Claude Code, Codex CLI, and Cursor CLI - supercharged for parallel
+            execution, visual architecture planning, and seamless merging.
           </p>
         </div>
 
-        {/* Start Section */}
-        <div className="mb-10">
-          <h2
-            className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}
-          >
-            Start
-          </h2>
-          <div className="space-y-4">
-            <button
-              className={`flex items-center gap-3 ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
-              onClick={handleBrowseFolder}
+        {/* Primary Actions - Compact */}
+        <div className="w-full max-w-4xl">
+          {/* Start Section */}
+          <div className="mb-10">
+            <h2
+              className={`text-2xl font-semibold ${themeClasses.textPrimary} mb-4 text-center`}
             >
-              <Folder className="w-5 h-5" />
-              Open...
-            </button>
-            <button
-              className={`flex items-center gap-3 ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
-              onClick={handleCloneRepository}
-            >
-              <GitBranch className="w-5 h-5" />
-              Clone Git Repository...
-            </button>
-          </div>
-        </div>
-
-        {/* Recent Section */}
-        <div>
-          <h2
-            className={`text-2xl font-normal ${themeClasses.textPrimary} mb-6`}
-          >
-            Recent
-          </h2>
-          {isLoading ? (
-            <div className={themeClasses.textSecondary}>
-              Loading recent projects...
-            </div>
-          ) : recentProjects.length > 0 ? (
-            <div className="space-y-2">
-              {recentProjects.map(project => (
-                <button
-                  className={`block text-left ${themeClasses.textAccent} hover:opacity-80 transition-opacity text-base`}
-                  key={project.path}
-                  onClick={() => handleProjectSelect(project)}
-                >
-                  <div className="flex justify-between items-center">
-                    <span>{project.name}</span>
-                    <span className={`text-sm ${themeClasses.textMuted} ml-4`}>
-                      {project.path.replace(/^.*\/([^/]+\/[^/]+)$/, '~/$1')}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className={`${themeClasses.textMuted} text-base`}>
-              No recent projects
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Right Side - Configuration */}
-      <div
-        className={`w-1/2 ${themeClasses.bgSecondary} p-12 border-l ${themeClasses.borderPrimary}`}
-      >
-        <div className="max-w-md">
-          <h2
-            className={`text-2xl font-normal ${themeClasses.textPrimary} mb-8`}
-          >
-            Configure Project
-          </h2>
-
-          {/* Selected Path Display */}
-          {repoPath && (
-            <div
-              className={`mb-6 p-4 ${themeClasses.bgTertiary} rounded-lg border ${themeClasses.borderSecondary}`}
-            >
-              <div className={`text-sm ${themeClasses.textSecondary} mb-1`}>
-                Selected Repository
-              </div>
-              <div className={`${themeClasses.textPrimary} font-medium`}>
-                {repoPath.split('/').pop()}
-              </div>
-              <div className={`text-xs ${themeClasses.textMuted} mt-1`}>
-                {repoPath}
-              </div>
-            </div>
-          )}
-
-          {/* AI Assistant Selector */}
-          <div className="mb-8">
-            <label className={`block text-lg ${themeClasses.textPrimary} mb-4`}>
-              Choose AI Assistant
-            </label>
-            <div className="space-y-3">
-              {(['claude-code', 'gemini-cli', 'codex'] as const).map(tool => (
-                <label
-                  className="flex items-center gap-3 cursor-pointer"
-                  key={tool}
-                >
-                  <input
-                    checked={selectedTool === tool}
-                    className={`w-4 h-4 ${themeClasses.textAccent} ${themeClasses.bgSecondary} ${themeClasses.borderPrimary} focus:ring-2 focus:ring-blue-500`}
-                    name="ai-tool"
-                    onChange={() => setSelectedTool(tool)}
-                    type="radio"
-                    value={tool}
-                  />
-                  <span className={themeClasses.textSecondary}>
-                    {tool === 'claude-code'
-                      ? 'Claude Code'
-                      : tool === 'gemini-cli'
-                        ? 'Gemini CLI'
-                        : 'Codex'}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Branch Selector */}
-          {repoPath && (
-            <div className="mb-8">
-              <label
-                className="block text-lg text-white mb-4"
-                htmlFor={branchDropdownId}
+              Get Started
+            </h2>
+            <div className="grid md:grid-cols-2 gap-8 max-w-2xl mx-auto">
+              <button
+                className={`${themeClasses.bgSecondary} ${themeClasses.borderPrimary} border-2 rounded-xl p-6 hover:${themeClasses.borderFocus} hover:scale-105 transition-all duration-200 group`}
+                onClick={handleBrowseFolder}
               >
-                Root Branch
-              </label>
-              <div className="relative">
-                <button
-                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-left flex items-center justify-between hover:border-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white"
-                  id={branchDropdownId}
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                >
-                  <span>{selectedBranch || 'Select a branch...'}</span>
-                  <ChevronDown className="w-5 h-5" />
-                </button>
-
-                {isDropdownOpen && branches.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-gray-700 border border-gray-600 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
-                    {branches.map(branch => (
-                      <button
-                        className="w-full px-4 py-3 text-left hover:bg-gray-600 first:rounded-t-lg last:rounded-b-lg text-white transition-colors"
-                        key={branch}
-                        onClick={() => {
-                          setSelectedBranch(branch)
-                          setIsDropdownOpen(false)
-                        }}
-                      >
-                        {branch}
-                      </button>
-                    ))}
+                <div className="flex flex-col items-center text-center">
+                  <div
+                    className={`p-3 rounded-full ${themeClasses.bgTertiary} mb-3 group-hover:scale-110 transition-transform`}
+                  >
+                    <Folder className={`w-6 h-6 ${themeClasses.textAccent}`} />
                   </div>
-                )}
+                  <h3
+                    className={`text-lg font-semibold ${themeClasses.textPrimary} mb-2`}
+                  >
+                    Open Project
+                  </h3>
+                  <p className={`text-sm ${themeClasses.textSecondary}`}>
+                    Browse and select an existing Git repository
+                  </p>
+                </div>
+              </button>
+
+              <button
+                className={`${themeClasses.bgSecondary} ${themeClasses.borderPrimary} border-2 rounded-xl p-6 hover:${themeClasses.borderFocus} hover:scale-105 transition-all duration-200 group`}
+                onClick={handleCloneRepository}
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div
+                    className={`p-3 rounded-full ${themeClasses.bgTertiary} mb-3 group-hover:scale-110 transition-transform`}
+                  >
+                    <GitBranch
+                      className={`w-6 h-6 ${themeClasses.textAccent}`}
+                    />
+                  </div>
+                  <h3
+                    className={`text-lg font-semibold ${themeClasses.textPrimary} mb-2`}
+                  >
+                    Clone Repository
+                  </h3>
+                  <p className={`text-sm ${themeClasses.textSecondary}`}>
+                    Clone a Git repository from URL
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Recent Projects */}
+          {!isLoading && recentProjects.length > 0 && (
+            <div className="mb-16">
+              <h2
+                className={`text-xl font-semibold ${themeClasses.textPrimary} mb-8 text-center`}
+              >
+                Recent Projects
+              </h2>
+              <div className="max-w-3xl mx-auto">
+                <div className="space-y-3">
+                  {recentProjects.slice(0, 5).map(project => (
+                    <button
+                      className={`w-full text-left p-4 rounded-lg ${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} hover:${themeClasses.borderFocus} hover:scale-[1.02] transition-all duration-200 group`}
+                      key={project.path}
+                      onClick={() => handleProjectSelect(project)}
+                    >
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div
+                            className={`font-medium ${themeClasses.textPrimary} group-hover:${themeClasses.textAccent} text-base`}
+                          >
+                            {project.name}
+                          </div>
+                          <div className={`text-sm ${themeClasses.textMuted}`}>
+                            {project.lastUsed}
+                          </div>
+                        </div>
+                        <div
+                          className={`text-sm ${themeClasses.textSecondary}`}
+                        >
+                          {project.path.replace(/^.*\/([^/]+\/[^/]+)$/, '~/$1')}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
-          {/* Launch Button */}
-          <button
-            className={`w-full px-6 py-3 ${themeClasses.btnPrimary} font-semibold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
-            disabled={!repoPath || !selectedBranch}
-            onClick={handleCreate}
-          >
-            Launch Workspace
-          </button>
+          {/* Logo at bottom center */}
+          <div className="flex justify-center">
+            <img
+              alt="Almond Coder"
+              className="w-16 h-16 opacity-30 hover:opacity-50 transition-opacity"
+              src="/AlmondTransparentLogo.svg"
+            />
+          </div>
         </div>
       </div>
 

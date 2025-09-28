@@ -52,11 +52,6 @@ interface MergeConflict {
   incomingBranch: string
 }
 
-interface MergeCheck {
-  canMerge: boolean
-  conflicts: MergeConflict[]
-  error?: string
-}
 
 interface DropAction {
   draggedNode: Node
@@ -102,7 +97,7 @@ export function Overview({
   projectContext: ProjectContext
 }) {
   const { theme } = useTheme()
-  const themeClasses = createThemeClasses(theme)
+  const _themeClasses = createThemeClasses(theme)
 
   const [nodes, setNodes] = useState<Node[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
@@ -201,7 +196,7 @@ export function Overview({
       }
     })
 
-    const generatedEdges: Edge[] = data.relationships.map((rel, index) => ({
+    const generatedEdges: Edge[] = data.relationships.map((rel) => ({
       id: `e-${rel.source}-${rel.target}`,
       source: rel.source,
       target: rel.target,
@@ -492,7 +487,7 @@ export function Overview({
             {mergeConflicts.map((conflict, index) => (
               <div
                 className="border border-gray-600 rounded-lg p-4"
-                key={index}
+                key={conflict.file}
               >
                 <h4 className="font-medium text-yellow-400 mb-3">
                   {conflict.file}

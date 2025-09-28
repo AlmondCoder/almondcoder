@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  EnhancedPromptHistoryItem,
+  ConversationHistory,
+  ConversationMessage,
+} from '../shared/types'
 
 declare global {
   interface Window {
@@ -39,7 +44,7 @@ const API = {
     onOutput?: (data: { type: string; data: string }) => void
   ) => {
     if (onOutput) {
-      const handler = (event: any, data: { type: string; data: string }) =>
+      const handler = (_event: any, data: { type: string; data: string }) =>
         onOutput(data)
       ipcRenderer.on('command-output', handler)
 
@@ -57,6 +62,31 @@ const API = {
     ipcRenderer.invoke('check-claude-installation'),
   installClaude: () => ipcRenderer.invoke('install-claude'),
   setupClaudePath: () => ipcRenderer.invoke('setup-claude-path'),
+  // Enhanced prompt tracking methods
+  getEnhancedPromptHistory: (projectPath: string) =>
+    ipcRenderer.invoke('get-enhanced-prompt-history', projectPath),
+  saveEnhancedPrompt: (promptData: EnhancedPromptHistoryItem) =>
+    ipcRenderer.invoke('save-enhanced-prompt', promptData),
+  updateEnhancedPrompt: (promptData: EnhancedPromptHistoryItem) =>
+    ipcRenderer.invoke('update-enhanced-prompt', promptData),
+  getConversationHistory: (projectPath: string, promptId: string) =>
+    ipcRenderer.invoke('get-conversation-history', projectPath, promptId),
+  saveConversationHistory: (conversationData: ConversationHistory) =>
+    ipcRenderer.invoke('save-conversation-history', conversationData),
+  addConversationMessage: (
+    projectPath: string,
+    promptId: string,
+    message: ConversationMessage
+  ) =>
+    ipcRenderer.invoke(
+      'add-conversation-message',
+      projectPath,
+      promptId,
+      message
+    ),
+  getCurrentBranchStatus: (projectPath: string, branchName: string) =>
+    ipcRenderer.invoke('get-current-branch-status', projectPath, branchName),
+  // Legacy methods for backward compatibility
   getProjectPromptHistory: (projectPath: string) =>
     ipcRenderer.invoke('get-project-prompt-history', projectPath),
   saveProjectPromptHistory: (projectPath: string, prompts: any[]) =>

@@ -2,44 +2,16 @@ import { useState, useEffect, useRef } from 'react'
 import { ClipboardList, Play } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 
-// Type definition for window.App
-declare global {
-  interface Window {
-    App: {
-      executeCommand: (command: string) => Promise<string>
-      executeCommandStream: (
-        command: string,
-        onOutput?: (data: { type: string; data: string }) => void
-      ) => Promise<string>
-      getProjectFiles: (projectPath: string) => Promise<string[]>
-      checkClaudeInstallation: () => Promise<{
-        installed: boolean
-        inPath: boolean
-      }>
-      installClaude: () => Promise<{
-        success: boolean
-        output?: string
-        error?: string
-      }>
-      setupClaudePath: () => Promise<{
-        success: boolean
-        output?: string
-        error?: string
-        shell?: string
-      }>
-      getProjectPromptHistory: (
-        projectPath: string
-      ) => Promise<PromptHistoryItem[]>
-      saveProjectPromptHistory: (
-        projectPath: string,
-        prompts: PromptHistoryItem[]
-      ) => Promise<boolean>
-    }
-  }
-}
+import type {
+  EnhancedPromptHistoryItem,
+  ConversationHistory,
+  ConversationMessage,
+  BranchStatus,
+  PromptStatus,
+} from '../../../shared/types'
 
-type PromptStatus = 'busy' | 'completed' | 'old'
 
+// Legacy interface for backward compatibility
 interface PromptHistoryItem {
   id: string
   text: string
@@ -122,7 +94,12 @@ export function Prompts({ projectContext }: PromptsProps) {
     },
   ]
 
-  const [promptHistory, setPromptHistory] = useState<PromptHistoryItem[]>([])
+  const [promptHistory, setPromptHistory] = useState<
+    EnhancedPromptHistoryItem[]
+  >([])
+  const [currentConversation, setCurrentConversation] =
+    useState<ConversationHistory | null>(null)
+  const [activePromptId, setActivePromptId] = useState<string | null>(null)
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(
     '+new'
   )
@@ -194,17 +171,27 @@ export function Prompts({ projectContext }: PromptsProps) {
     loadProjectFiles()
   }, [projectContext?.projectPath])
 
-  // Load prompt history when project changes
+  // Load enhanced prompt history when project changes
   useEffect(() => {
     const loadPromptHistory = async () => {
       if (projectContext?.projectPath) {
         try {
-          const history = await window.App.getProjectPromptHistory(
+          const history = await window.App.getEnhancedPromptHistory(
             projectContext.projectPath
           )
-          setPromptHistory(history)
+          setPromptHistory(
+            history.map((item: any) => ({
+              ...item,
+              startExecutionTime: new Date(item.startExecutionTime),
+              endExecutionTime: item.endExecutionTime
+                ? new Date(item.endExecutionTime)
+                : null,
+              createdAt: new Date(item.createdAt),
+              updatedAt: new Date(item.updatedAt),
+            }))
+          )
         } catch (error) {
-          console.error('Error loading prompt history:', error)
+          console.error('Error loading enhanced prompt history:', error)
           setPromptHistory([])
         }
       } else {
@@ -214,6 +201,51 @@ export function Prompts({ projectContext }: PromptsProps) {
 
     loadPromptHistory()
   }, [projectContext?.projectPath])
+
+  // Load conversation history when active prompt changes
+  useEffect(() => {
+    const loadConversation = async () => {
+      if (
+        projectContext?.projectPath &&
+        activePromptId &&
+        activePromptId !== '+new'
+      ) {
+        try {
+          const conversation = await window.App.getConversationHistory(
+            projectContext.projectPath,
+            activePromptId
+          )
+          if (conversation) {
+            setCurrentConversation({
+              ...conversation,
+              messages: conversation.messages.map((msg: any) => ({
+                ...msg,
+                timestamp: new Date(msg.timestamp),
+              })),
+              createdAt: new Date(conversation.createdAt),
+              updatedAt: new Date(conversation.updatedAt),
+            })
+            setChatMessages(
+              conversation.messages.map((msg: any) => ({
+                ...msg,
+                timestamp: new Date(msg.timestamp),
+              }))
+            )
+          }
+        } catch (error) {
+          console.error('Error loading conversation history:', error)
+          setCurrentConversation(null)
+        }
+      } else {
+        setCurrentConversation(null)
+        if (activePromptId === '+new') {
+          setChatMessages([])
+        }
+      }
+    }
+
+    loadConversation()
+  }, [projectContext?.projectPath, activePromptId])
 
   const getStatusColor = (status: PromptStatus) => {
     switch (status) {
@@ -232,7 +264,7 @@ export function Prompts({ projectContext }: PromptsProps) {
     const maxWords = maxLines * wordsPerLine
 
     if (words.length <= maxWords) return text
-    return words.slice(0, maxWords).join(' ') + '...'
+    return `${words.slice(0, maxWords).join(' ')}...`
   }
 
   const togglePromptExpansion = (promptId: string) => {
@@ -245,12 +277,12 @@ export function Prompts({ projectContext }: PromptsProps) {
     setExpandedPrompts(newExpanded)
   }
 
-  const addChatMessage = (
+  const addChatMessage = async (
     content: string,
     type: 'user' | 'system' | 'assistant',
     isStreaming = false
   ) => {
-    const newMessage = {
+    const newMessage: ConversationMessage = {
       id: Date.now().toString(),
       content,
       type,
@@ -258,6 +290,23 @@ export function Prompts({ projectContext }: PromptsProps) {
       isStreaming,
     }
     setChatMessages(prev => [...prev, newMessage])
+
+    // Save to conversation history if we have an active prompt
+    if (
+      projectContext?.projectPath &&
+      activePromptId &&
+      activePromptId !== '+new'
+    ) {
+      try {
+        await window.App.addConversationMessage(
+          projectContext.projectPath,
+          activePromptId,
+          newMessage
+        )
+      } catch (error) {
+        console.error('Error saving conversation message:', error)
+      }
+    }
 
     // Auto-scroll to bottom
     setTimeout(() => {
@@ -306,47 +355,93 @@ export function Prompts({ projectContext }: PromptsProps) {
 
   const savePromptToHistory = async (
     promptText: string,
+    branch: string,
     status: PromptStatus = 'busy'
   ): Promise<string | null> => {
     if (!projectContext?.projectPath) return null
 
-    const newPrompt: PromptHistoryItem = {
-      id: Date.now().toString(),
-      text: promptText,
+    const promptId = Date.now().toString()
+    const currentTime = new Date()
+
+    const newPrompt: EnhancedPromptHistoryItem = {
+      id: promptId,
+      prompt: promptText,
+      startExecutionTime: currentTime,
+      endExecutionTime: null,
+      branch,
+      branchStatus: 'active',
+      promptHistoryId: promptId,
       status,
-      timestamp: new Date(),
+      projectPath: projectContext.projectPath,
+      createdAt: currentTime,
+      updatedAt: currentTime,
     }
 
     const updatedHistory = [newPrompt, ...promptHistory]
     setPromptHistory(updatedHistory)
+    setActivePromptId(promptId)
 
     try {
-      await window.App.saveProjectPromptHistory(
-        projectContext.projectPath,
-        updatedHistory
-      )
-      return newPrompt.id
+      await window.App.saveEnhancedPrompt(newPrompt)
+
+      // Create initial conversation history
+      const initialConversation: ConversationHistory = {
+        promptId,
+        projectPath: projectContext.projectPath,
+        messages: [],
+        createdAt: currentTime,
+        updatedAt: currentTime,
+      }
+      await window.App.saveConversationHistory(initialConversation)
+      setCurrentConversation(initialConversation)
+
+      return promptId
     } catch (error) {
-      console.error('Error saving prompt history:', error)
+      console.error('Error saving enhanced prompt:', error)
       return null
     }
   }
 
-  const updatePromptStatus = async (promptId: string, status: PromptStatus) => {
+  const updatePromptStatus = async (
+    promptId: string,
+    status: PromptStatus,
+    endTime?: Date
+  ) => {
     if (!projectContext?.projectPath) return
 
-    const updatedHistory = promptHistory.map(prompt =>
-      prompt.id === promptId ? { ...prompt, status } : prompt
-    )
+    const updatedHistory = promptHistory.map(prompt => {
+      if (prompt.id === promptId) {
+        const updatedPrompt = {
+          ...prompt,
+          status,
+          endExecutionTime:
+            endTime ||
+            (status === 'completed' ? new Date() : prompt.endExecutionTime),
+          updatedAt: new Date(),
+        }
+        return updatedPrompt
+      }
+      return prompt
+    })
     setPromptHistory(updatedHistory)
 
     try {
-      await window.App.saveProjectPromptHistory(
-        projectContext.projectPath,
-        updatedHistory
-      )
+      const promptToUpdate = updatedHistory.find(p => p.id === promptId)
+      if (promptToUpdate) {
+        await window.App.updateEnhancedPrompt(promptToUpdate)
+
+        // Update branch status if prompt is completed
+        if (status === 'completed' && projectContext) {
+          const branchStatus = await window.App.getCurrentBranchStatus(
+            projectContext.projectPath,
+            promptToUpdate.branch
+          )
+          promptToUpdate.branchStatus = branchStatus
+          await window.App.updateEnhancedPrompt(promptToUpdate)
+        }
+      }
     } catch (error) {
-      console.error('Error updating prompt history:', error)
+      console.error('Error updating enhanced prompt:', error)
     }
   }
 
@@ -451,8 +546,13 @@ export function Prompts({ projectContext }: PromptsProps) {
     setIsExecuting(true)
     setInputMode('compact')
 
-    // Save prompt to history
-    const promptId = await savePromptToHistory(currentPrompt, 'busy')
+    // Save prompt to history with current branch
+    const currentBranch = projectContext.selectedBranch || 'main'
+    const promptId = await savePromptToHistory(
+      currentPrompt,
+      currentBranch,
+      'busy'
+    )
 
     // Add user message
     addChatMessage(currentPrompt, 'user')
@@ -479,7 +579,7 @@ export function Prompts({ projectContext }: PromptsProps) {
       const claudeCommand = `cd "${projectContext.projectPath}" && ${claudeCmd} -p "${currentPrompt}" --plan --permission-mode acceptEdits`
 
       // Start streaming message
-      const messageId = addChatMessage('', 'assistant', true)
+      const messageId = await addChatMessage('', 'assistant', true)
       setStreamingMessageId(messageId)
 
       try {
@@ -532,8 +632,13 @@ export function Prompts({ projectContext }: PromptsProps) {
     setIsExecuting(true)
     setInputMode('compact')
 
-    // Save prompt to history
-    const promptId = await savePromptToHistory(currentPrompt, 'busy')
+    // Save prompt to history with current branch
+    const currentBranch = projectContext.selectedBranch || 'main'
+    const promptId = await savePromptToHistory(
+      currentPrompt,
+      currentBranch,
+      'busy'
+    )
 
     // Add user message
     addChatMessage(currentPrompt, 'user')
@@ -586,7 +691,7 @@ export function Prompts({ projectContext }: PromptsProps) {
       const claudeCommand = `cd "${projectContext.projectPath}" && ${claudeCmd} -p "${currentPrompt}" --permission-mode acceptEdits`
 
       // Start streaming message
-      const messageId = addChatMessage('', 'assistant', true)
+      const messageId = await addChatMessage('', 'assistant', true)
       setStreamingMessageId(messageId)
 
       try {
@@ -643,14 +748,14 @@ export function Prompts({ projectContext }: PromptsProps) {
         className={`w-1/5 border-r ${themeClasses.borderPrimary} p-4 overflow-y-auto`}
       >
         <h3
-          className={`text-lg font-semibold mb-4 ${themeClasses.textPrimary}`}
+          className={`text-md font-semibold mb-4 ${themeClasses.textPrimary}`}
         >
           Prompt History
         </h3>
         <div className="space-y-3">
           {/* +New Prompt Option */}
-          <div
-            className={`${selectedPromptId === '+new' ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${selectedPromptId === '+new' ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors`}
+          <button
+            className={`${selectedPromptId === '+new' ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${selectedPromptId === '+new' ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors w-full text-left`}
             onClick={() => {
               setSelectedPromptId('+new')
               setCurrentPrompt('')
@@ -664,33 +769,39 @@ export function Prompts({ projectContext }: PromptsProps) {
                 + New Prompt
               </span>
             </div>
-          </div>
+          </button>
 
           {/* Existing Prompts */}
           {promptHistory.map(prompt => {
             const isExpanded = expandedPrompts.has(prompt.id)
             const isSelected = selectedPromptId === prompt.id
             const displayText = isExpanded
-              ? prompt.text
-              : truncatePrompt(prompt.text)
-            const needsTruncation = prompt.text.split(' ').length > 20
+              ? prompt.prompt
+              : truncatePrompt(prompt.prompt)
+            const needsTruncation = prompt.prompt.split(' ').length > 20
 
             return (
-              <div
-                className={`${isSelected ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${isSelected ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors`}
+              <button
+                className={`${isSelected ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${isSelected ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors w-full text-left`}
                 key={prompt.id}
                 onClick={() => {
                   setSelectedPromptId(prompt.id)
-                  setCurrentPrompt(prompt.text)
+                  setCurrentPrompt(prompt.prompt)
+                  setActivePromptId(prompt.id)
                 }}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div
                     className={`w-2 h-2 rounded-full ${getStatusColor(prompt.status)} mt-1 flex-shrink-0`}
                   />
-                  <span className={`text-xs ${themeClasses.textTertiary} ml-2`}>
-                    {prompt.timestamp.toLocaleDateString()}
-                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className={`text-xs ${themeClasses.textTertiary}`}>
+                      {prompt.createdAt.toLocaleDateString()}
+                    </span>
+                    <span className={`text-xs ${themeClasses.textTertiary}`}>
+                      {prompt.branch}
+                    </span>
+                  </div>
                 </div>
                 <p
                   className={`text-sm ${themeClasses.textSecondary} ${needsTruncation ? `cursor-pointer hover:${themeClasses.textPrimary}` : ''}`}
@@ -714,7 +825,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                 >
                   {displayText}
                 </p>
-              </div>
+              </button>
             )
           })}
         </div>
