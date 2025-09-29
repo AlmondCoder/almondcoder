@@ -52,7 +52,6 @@ interface MergeConflict {
   incomingBranch: string
 }
 
-
 interface DropAction {
   draggedNode: Node
   targetNode: Node
@@ -196,7 +195,7 @@ export function Overview({
       }
     })
 
-    const generatedEdges: Edge[] = data.relationships.map((rel) => ({
+    const generatedEdges: Edge[] = data.relationships.map(rel => ({
       id: `e-${rel.source}-${rel.target}`,
       source: rel.source,
       target: rel.target,

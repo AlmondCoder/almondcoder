@@ -1,30 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
-import { ClipboardList, Play } from 'lucide-react'
+import { ClipboardList, Play, ChevronDown } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 
 import type {
   EnhancedPromptHistoryItem,
   ConversationHistory,
   ConversationMessage,
-  BranchStatus,
   PromptStatus,
 } from '../../../shared/types'
 
-
-// Legacy interface for backward compatibility
-interface PromptHistoryItem {
-  id: string
-  text: string
-  status: PromptStatus
-  timestamp: Date
-}
-
-interface FileChange {
-  path: string
-  additions: number
-  deletions: number
-}
-
+// it should not be project context to have selectedTool and selectedBranch in there.
 interface ProjectContext {
   projectPath: string
   selectedTool: string
@@ -51,11 +36,10 @@ export function Prompts({ projectContext }: PromptsProps) {
     }>
   >([])
   const [isExecuting, setIsExecuting] = useState(false)
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
+  const [_streamingMessageId, setStreamingMessageId] = useState<string | null>(
     null
   )
-  const [inputMode, setInputMode] = useState<'full' | 'compact'>('full')
-  const [projectFiles, setProjectFiles] = useState<FileChange[]>([])
+
   const [claudeStatus, setClaudeStatus] = useState<{
     installed: boolean
     inPath: boolean
@@ -70,7 +54,7 @@ export function Prompts({ projectContext }: PromptsProps) {
   const [activePills, setActivePills] = useState<Set<number>>(new Set())
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
-  // Prompt pills data
+  // Prompt pills data should be from .json file present in the project directory.
   const promptPills = [
     {
       label: 'Tailwind Frontend',
@@ -104,6 +88,20 @@ export function Prompts({ projectContext }: PromptsProps) {
     '+new'
   )
 
+  // AI Tool and Branch selection state
+  const [selectedAITool, setSelectedAITool] = useState<
+    'claude-code' | 'codex' | 'cursor-cli'
+  >('claude-code')
+  const [selectedBranch, setSelectedBranch] = useState<string>('')
+  const [availableBranches, setAvailableBranches] = useState<string[]>([])
+  const [isAIToolDropdownOpen, setIsAIToolDropdownOpen] = useState(false)
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false)
+
+  // Worktree state
+  const [currentWorktreePath, setCurrentWorktreePath] = useState<
+    string | undefined
+  >(undefined)
+
   // Check Claude installation on component mount
   useEffect(() => {
     const checkClaudeInstallation = async () => {
@@ -130,46 +128,6 @@ export function Prompts({ projectContext }: PromptsProps) {
   }, [])
 
   // Load project files when component mounts
-  useEffect(() => {
-    const loadProjectFiles = async () => {
-      if (projectContext?.projectPath) {
-        try {
-          // Get project files from the loaded project
-          const files = await window.App.getProjectFiles(
-            projectContext.projectPath
-          )
-
-          // Convert to FileChange format with dummy data for now
-          const fileChanges: FileChange[] =
-            files?.map((file: string) => ({
-              path: file,
-              additions: Math.floor(Math.random() * 50) + 1,
-              deletions: Math.floor(Math.random() * 10),
-            })) || []
-
-          setProjectFiles(fileChanges)
-        } catch (error) {
-          console.error('Error loading project files:', error)
-          // Fallback to mock data
-          setProjectFiles([
-            { path: 'src/main.ts', additions: 25, deletions: 3 },
-            { path: 'src/components/App.tsx', additions: 12, deletions: 0 },
-            { path: 'package.json', additions: 2, deletions: 1 },
-          ])
-        }
-      } else {
-        // Mock data when no project context
-        setProjectFiles([
-          { path: 'src/auth/AuthService.ts', additions: 45, deletions: 12 },
-          { path: 'src/components/LoginForm.tsx', additions: 23, deletions: 5 },
-          { path: 'src/utils/validation.ts', additions: 18, deletions: 3 },
-          { path: 'package.json', additions: 2, deletions: 0 },
-        ])
-      }
-    }
-
-    loadProjectFiles()
-  }, [projectContext?.projectPath])
 
   // Load enhanced prompt history when project changes
   useEffect(() => {
@@ -231,6 +189,13 @@ export function Prompts({ projectContext }: PromptsProps) {
                 timestamp: new Date(msg.timestamp),
               }))
             )
+
+            // Set the worktree path for this conversation
+            setCurrentWorktreePath(conversation.worktreePath)
+            console.log(
+              'Loaded conversation with worktree:',
+              conversation.worktreePath
+            )
           }
         } catch (error) {
           console.error('Error loading conversation history:', error)
@@ -240,12 +205,40 @@ export function Prompts({ projectContext }: PromptsProps) {
         setCurrentConversation(null)
         if (activePromptId === '+new') {
           setChatMessages([])
+          setCurrentWorktreePath(undefined) // Clear worktree path for new conversations
         }
       }
     }
 
     loadConversation()
   }, [projectContext?.projectPath, activePromptId])
+
+  // Load available branches when project context changes
+  useEffect(() => {
+    const loadBranches = async () => {
+      if (projectContext?.projectPath) {
+        try {
+          const branches = await window.App.getGitBranches(
+            projectContext.projectPath
+          )
+          setAvailableBranches(branches)
+          // Set the selected branch to the current project branch or first available
+          const defaultBranch =
+            projectContext.selectedBranch || branches[0] || 'main'
+          setSelectedBranch(defaultBranch)
+        } catch (error) {
+          console.error('Error loading branches:', error)
+          setAvailableBranches([])
+          setSelectedBranch('main')
+        }
+      } else {
+        setAvailableBranches([])
+        setSelectedBranch('')
+      }
+    }
+
+    loadBranches()
+  }, [projectContext?.projectPath, projectContext?.selectedBranch])
 
   const getStatusColor = (status: PromptStatus) => {
     switch (status) {
@@ -363,6 +356,26 @@ export function Prompts({ projectContext }: PromptsProps) {
     const promptId = Date.now().toString()
     const currentTime = new Date()
 
+    let worktreePath: string | undefined
+    try {
+      const worktreeResult = await window.App.createWorktree(
+        projectContext.projectPath,
+        branch,
+        promptText,
+        promptId
+      )
+
+      if (worktreeResult.success) {
+        worktreePath = worktreeResult.worktreeInfo.worktreePath
+        setCurrentWorktreePath(worktreePath)
+        console.log('Created worktree:', worktreePath)
+      } else {
+        console.error('Failed to create worktree:', worktreeResult.error)
+      }
+    } catch (error) {
+      console.error('Error creating worktree:', error)
+    }
+
     const newPrompt: EnhancedPromptHistoryItem = {
       id: promptId,
       prompt: promptText,
@@ -373,6 +386,7 @@ export function Prompts({ projectContext }: PromptsProps) {
       promptHistoryId: promptId,
       status,
       projectPath: projectContext.projectPath,
+      worktreePath,
       createdAt: currentTime,
       updatedAt: currentTime,
     }
@@ -388,6 +402,7 @@ export function Prompts({ projectContext }: PromptsProps) {
       const initialConversation: ConversationHistory = {
         promptId,
         projectPath: projectContext.projectPath,
+        worktreePath,
         messages: [],
         createdAt: currentTime,
         updatedAt: currentTime,
@@ -544,10 +559,10 @@ export function Prompts({ projectContext }: PromptsProps) {
     if (!currentPrompt.trim() || !projectContext) return
 
     setIsExecuting(true)
-    setInputMode('compact')
 
-    // Save prompt to history with current branch
-    const currentBranch = projectContext.selectedBranch || 'main'
+    // Save prompt to history with selected branch
+    const currentBranch =
+      selectedBranch || projectContext.selectedBranch || 'main'
     const promptId = await savePromptToHistory(
       currentPrompt,
       currentBranch,
@@ -557,26 +572,45 @@ export function Prompts({ projectContext }: PromptsProps) {
     // Add user message
     addChatMessage(currentPrompt, 'user')
 
-    // Check and install Claude if needed
-    const claudeReady = await installClaudeIfNeeded()
-    if (!claudeReady) {
-      setIsExecuting(false)
-      if (promptId) updatePromptStatus(promptId, 'old')
-      return
+    // Check and install Claude if needed (only for claude-code)
+    if (selectedAITool === 'claude-code') {
+      const claudeReady = await installClaudeIfNeeded()
+      if (!claudeReady) {
+        setIsExecuting(false)
+        if (promptId) updatePromptStatus(promptId, 'old')
+        return
+      }
     }
 
     // Add system message about planning
+    const toolName =
+      selectedAITool === 'claude-code'
+        ? 'Claude Code'
+        : selectedAITool === 'codex'
+          ? 'Codex'
+          : 'Cursor CLI'
     addChatMessage(
-      `Planning in ${projectContext.projectPath.split('/').pop()}...`,
+      `Planning with ${toolName} in ${projectContext.projectPath.split('/').pop()}...`,
       'system'
     )
 
     try {
-      // Use full path if Claude is not in PATH
-      const claudeCmd = claudeStatus.inPath
-        ? 'claude'
-        : '$HOME/.local/bin/claude'
-      const claudeCommand = `cd "${projectContext.projectPath}" && ${claudeCmd} -p "${currentPrompt}" --plan --permission-mode acceptEdits`
+      // Use worktree path if available, otherwise fall back to project path
+      const workingDirectory = currentWorktreePath || projectContext.projectPath
+
+      // Generate command based on selected AI tool (without cd since we're setting working directory)
+      let command: string
+      if (selectedAITool === 'claude-code') {
+        const claudeCmd = claudeStatus.inPath
+          ? 'claude'
+          : '$HOME/.local/bin/claude'
+        command = `${claudeCmd} -p "${currentPrompt}" --plan --permission-mode acceptEdits`
+      } else if (selectedAITool === 'codex') {
+        command = `codex --plan "${currentPrompt}"`
+      } else {
+        // cursor-cli
+        command = `cursor --plan "${currentPrompt}"`
+      }
 
       // Start streaming message
       const messageId = await addChatMessage('', 'assistant', true)
@@ -584,13 +618,14 @@ export function Prompts({ projectContext }: PromptsProps) {
 
       try {
         const output = await window.App.executeCommandStream(
-          claudeCommand,
+          command,
           data => {
             // Update the streaming message with new data
             if (data.type === 'stdout' || data.type === 'stderr') {
               updateStreamingMessage(messageId, data.data)
             }
-          }
+          },
+          workingDirectory
         )
 
         // Finalize the streaming message
@@ -630,10 +665,10 @@ export function Prompts({ projectContext }: PromptsProps) {
     if (!currentPrompt.trim() || !projectContext) return
 
     setIsExecuting(true)
-    setInputMode('compact')
 
-    // Save prompt to history with current branch
-    const currentBranch = projectContext.selectedBranch || 'main'
+    // Save prompt to history with selected branch
+    const currentBranch =
+      selectedBranch || projectContext.selectedBranch || 'main'
     const promptId = await savePromptToHistory(
       currentPrompt,
       currentBranch,
@@ -643,52 +678,78 @@ export function Prompts({ projectContext }: PromptsProps) {
     // Add user message
     addChatMessage(currentPrompt, 'user')
 
-    // Check and install Claude if needed
-    const claudeReady = await installClaudeIfNeeded()
-    if (!claudeReady) {
-      setIsExecuting(false)
-      if (promptId) updatePromptStatus(promptId, 'old')
-      return
+    // Check and install Claude if needed (only for claude-code)
+    if (selectedAITool === 'claude-code') {
+      const claudeReady = await installClaudeIfNeeded()
+      if (!claudeReady) {
+        setIsExecuting(false)
+        if (promptId) updatePromptStatus(promptId, 'old')
+        return
+      }
     }
 
     // Add system message about execution
+    const toolName =
+      selectedAITool === 'claude-code'
+        ? 'Claude Code'
+        : selectedAITool === 'codex'
+          ? 'Codex'
+          : 'Cursor CLI'
     addChatMessage(
-      `Executing in ${projectContext.projectPath.split('/').pop()}...`,
+      `Executing with ${toolName} in ${projectContext.projectPath.split('/').pop()}...`,
       'system'
     )
 
     try {
-      // Ensure we're on the selected root branch
-      addChatMessage(
-        `Switching to root branch: ${projectContext.selectedBranch}`,
-        'system'
-      )
-      await window.App.executeCommand(
-        `cd "${projectContext.projectPath}" && git checkout ${projectContext.selectedBranch}`
-      )
+      // Use worktree path if available, otherwise fall back to project path
+      const workingDirectory = currentWorktreePath || projectContext.projectPath
 
-      // Create sanitized branch name
-      const branchName = currentPrompt
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .replace(/\s+/g, '-')
-        .substring(0, 50)
-        .replace(/^-+|-+$/g, '') // Remove leading/trailing dashes
+      // If using worktree, we're already on the correct branch and in an isolated workspace
+      if (currentWorktreePath) {
+        addChatMessage(
+          `Using isolated worktree: ${currentWorktreePath.split('/').pop()}`,
+          'system'
+        )
+      } else {
+        // Fallback to original git branch logic for non-worktree execution
+        addChatMessage(`Switching to root branch: ${currentBranch}`, 'system')
+        await window.App.executeCommand(
+          `git checkout ${currentBranch}`,
+          projectContext.projectPath
+        )
 
-      // Create new git branch from the selected root branch
-      addChatMessage(`Creating new branch: ${branchName}`, 'system')
-      await window.App.executeCommand(
-        `cd "${projectContext.projectPath}" && git checkout -b "${branchName}"`
-      )
+        // Create sanitized branch name
+        const branchName = currentPrompt
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .replace(/\s+/g, '-')
+          .substring(0, 50)
+          .replace(/^-+|-+$/g, '') // Remove leading/trailing dashes
 
-      // Execute Claude command in the project directory
-      addChatMessage(`Running Claude with your prompt...`, 'system')
+        // Create new git branch from the selected root branch
+        addChatMessage(`Creating new branch: ${branchName}`, 'system')
+        await window.App.executeCommand(
+          `git checkout -b "${branchName}"`,
+          projectContext.projectPath
+        )
+      }
 
-      // Use full path if Claude is not in PATH
-      const claudeCmd = claudeStatus.inPath
-        ? 'claude'
-        : '$HOME/.local/bin/claude'
-      const claudeCommand = `cd "${projectContext.projectPath}" && ${claudeCmd} -p "${currentPrompt}" --permission-mode acceptEdits`
+      // Execute command in the working directory
+      addChatMessage(`Running ${toolName} with your prompt...`, 'system')
+
+      // Generate command based on selected AI tool (without cd since we're setting working directory)
+      let command: string
+      if (selectedAITool === 'claude-code') {
+        const claudeCmd = claudeStatus.inPath
+          ? 'claude'
+          : '$HOME/.local/bin/claude'
+        command = `${claudeCmd} -p "${currentPrompt}" --permission-mode acceptEdits`
+      } else if (selectedAITool === 'codex') {
+        command = `codex "${currentPrompt}"`
+      } else {
+        // cursor-cli
+        command = `cursor "${currentPrompt}"`
+      }
 
       // Start streaming message
       const messageId = await addChatMessage('', 'assistant', true)
@@ -696,13 +757,14 @@ export function Prompts({ projectContext }: PromptsProps) {
 
       try {
         const output = await window.App.executeCommandStream(
-          claudeCommand,
+          command,
           data => {
             // Update the streaming message with new data
             if (data.type === 'stdout' || data.type === 'stderr') {
               updateStreamingMessage(messageId, data.data)
             }
-          }
+          },
+          workingDirectory
         )
 
         // Finalize the streaming message
@@ -1052,63 +1114,217 @@ export function Prompts({ projectContext }: PromptsProps) {
           </div>
 
           {/* Input Area */}
-          <div className="relative">
-            <textarea
-              className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-4 pr-32 ${themeClasses.textPrimary} placeholder-gray-400 resize-none focus:outline-none ${themeClasses.borderFocus} h-20 min-h-[80px] w-full`}
-              onChange={e => {
-                setCurrentPrompt(e.target.value)
-                // Set to New Prompt when user types
-                if (selectedPromptId !== '+new') {
-                  setSelectedPromptId('+new')
-                }
-              }}
-              placeholder="Enter your prompt here..."
-              value={currentPrompt}
-            />
+          <div className="space-y-3">
+            {/* Textarea */}
+            <div className="relative">
+              <textarea
+                className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-4 pl-4 pr-4 ${themeClasses.textPrimary} placeholder-gray-400 resize-none focus:outline-none ${themeClasses.borderFocus} h-32 min-h-[128px] w-full`}
+                onChange={e => {
+                  setCurrentPrompt(e.target.value)
+                  // Set to New Prompt when user types
+                  if (selectedPromptId !== '+new') {
+                    setSelectedPromptId('+new')
+                  }
+                }}
+                placeholder="Enter your prompt here..."
+                value={currentPrompt}
+              />
 
-            <div className="absolute right-2 bottom-3 flex gap-1 pointer-events-none">
-              {/* Allow pointer events only on buttons */}
-              <button
-                className={`${themeClasses.btnSecondary} disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1.5 pointer-events-auto`}
-                disabled={
-                  !currentPrompt.trim() ||
-                  isExecuting ||
-                  !projectContext ||
-                  claudeStatus.checking
-                }
-                onClick={handleExecute}
-                title={
-                  !projectContext
-                    ? 'Please select a project first'
-                    : claudeStatus.checking
-                      ? 'Checking Claude CLI installation...'
-                      : 'Execute the prompt'
-                }
-              >
-                <Play className="w-3 h-3" />
-                <span className="text-xs">Execute</span>
-              </button>
+              {/* Left side dropdowns */}
+              <div className="absolute left-2 bottom-3 flex gap-1 pointer-events-none">
+                {/* AI Tool Dropdown */}
+                <div className="relative pointer-events-auto">
+                  <button
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-medium text-gray-200 hover:border-gray-500 focus:outline-none focus:border-orange-500 min-w-[100px] flex items-center justify-between transition-all"
+                    onClick={() => {
+                      setIsAIToolDropdownOpen(!isAIToolDropdownOpen)
+                      setIsBranchDropdownOpen(false)
+                    }}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-orange-400">✦</span>
+                      <span className="text-xs">
+                        {selectedAITool === 'claude-code'
+                          ? 'Claude Code'
+                          : selectedAITool === 'codex'
+                            ? 'Codex'
+                            : 'Cursor'}
+                      </span>
+                    </div>
+                    <ChevronDown className="w-3 h-3 ml-1" />
+                  </button>
 
-              <button
-                className={`${themeClasses.btnPrimary} disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1.5 pointer-events-auto`}
-                disabled={
-                  !currentPrompt.trim() ||
-                  isExecuting ||
-                  !projectContext ||
-                  claudeStatus.checking
-                }
-                onClick={handlePlan}
-                title={
-                  !projectContext
-                    ? 'Please select a project first'
-                    : claudeStatus.checking
-                      ? 'Checking Claude CLI installation...'
-                      : 'Plan the implementation'
-                }
-              >
-                <ClipboardList className="w-3 h-3" />
-                <span className="text-xs">Plan</span>
-              </button>
+                  {isAIToolDropdownOpen && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-20 min-w-[220px] max-w-sm">
+                      {/* Claude Code */}
+                      <button
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-700 first:rounded-t-lg transition-colors ${selectedAITool === 'claude-code' ? 'bg-gray-700' : ''}`}
+                        onClick={() => {
+                          setSelectedAITool('claude-code')
+                          setIsAIToolDropdownOpen(false)
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-orange-400 text-lg">✦</span>
+                          <div>
+                            <div className="text-gray-200 font-medium">
+                              Claude Code
+                            </div>
+                          </div>
+                          {selectedAITool === 'claude-code' && (
+                            <div className="ml-auto">
+                              <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+
+                      {/* Codex */}
+                      <button
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-700 transition-colors ${selectedAITool === 'codex' ? 'bg-gray-700' : ''}`}
+                        onClick={() => {
+                          setSelectedAITool('codex')
+                          setIsAIToolDropdownOpen(false)
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-blue-400 text-lg">✦</span>
+                          <div>
+                            <div className="text-gray-200 font-medium">
+                              Codex
+                            </div>
+                          </div>
+                          {selectedAITool === 'codex' && (
+                            <div className="ml-auto">
+                              <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+
+                      <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-600">
+                        Choose your preferred AI coding tool
+                      </div>
+
+                      {/* Cursor */}
+                      <button
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-700 last:rounded-b-lg transition-colors ${selectedAITool === 'cursor-cli' ? 'bg-gray-700' : ''}`}
+                        onClick={() => {
+                          setSelectedAITool('cursor-cli')
+                          setIsAIToolDropdownOpen(false)
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-purple-400 text-lg">✦</span>
+                          <div>
+                            <div className="text-gray-200 font-medium">
+                              Cursor
+                            </div>
+                          </div>
+                          {selectedAITool === 'cursor-cli' && (
+                            <div className="ml-auto">
+                              <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Branch Dropdown */}
+                <div className="relative pointer-events-auto">
+                  <button
+                    className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-medium text-gray-200 hover:border-gray-500 focus:outline-none focus:border-orange-500 min-w-[90px] flex items-center justify-between transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={availableBranches.length === 0}
+                    onClick={() => {
+                      setIsBranchDropdownOpen(!isBranchDropdownOpen)
+                      setIsAIToolDropdownOpen(false)
+                    }}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-green-400 text-xs">🌿</span>
+                      <span className="text-xs truncate max-w-[60px]">
+                        {selectedBranch || 'No branch'}
+                      </span>
+                    </div>
+                    <ChevronDown className="w-3 h-3 ml-1" />
+                  </button>
+
+                  {isBranchDropdownOpen && availableBranches.length > 0 && (
+                    <div className="absolute bottom-full left-0 mb-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-20 min-w-[180px] max-h-48 overflow-y-auto">
+                      {availableBranches.map(branch => (
+                        <button
+                          className={`w-full text-left px-4 py-3 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg transition-colors ${branch === selectedBranch ? 'bg-gray-700' : ''}`}
+                          key={branch}
+                          onClick={() => {
+                            setSelectedBranch(branch)
+                            setIsBranchDropdownOpen(false)
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-green-400">🌿</span>
+                            <div className="text-gray-200 font-medium">
+                              {branch}
+                            </div>
+                            {branch === selectedBranch && (
+                              <div className="ml-auto">
+                                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right side buttons */}
+              <div className="absolute right-2 bottom-3 flex gap-1 pointer-events-none">
+                {/* Allow pointer events only on buttons */}
+                <button
+                  className={`${themeClasses.btnSecondary} disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1.5 pointer-events-auto`}
+                  disabled={
+                    !currentPrompt.trim() ||
+                    isExecuting ||
+                    !projectContext ||
+                    claudeStatus.checking
+                  }
+                  onClick={handleExecute}
+                  title={
+                    !projectContext
+                      ? 'Please select a project first'
+                      : claudeStatus.checking
+                        ? 'Checking Claude CLI installation...'
+                        : 'Execute the prompt'
+                  }
+                >
+                  <Play className="w-3 h-3" />
+                  <span className="text-xs">Execute</span>
+                </button>
+
+                <button
+                  className={`${themeClasses.btnPrimary} disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1.5 pointer-events-auto`}
+                  disabled={
+                    !currentPrompt.trim() ||
+                    isExecuting ||
+                    !projectContext ||
+                    claudeStatus.checking
+                  }
+                  onClick={handlePlan}
+                  title={
+                    !projectContext
+                      ? 'Please select a project first'
+                      : claudeStatus.checking
+                        ? 'Checking Claude CLI installation...'
+                        : 'Plan the implementation'
+                  }
+                >
+                  <ClipboardList className="w-3 h-3" />
+                  <span className="text-xs">Plan</span>
+                </button>
+              </div>
             </div>
           </div>
 

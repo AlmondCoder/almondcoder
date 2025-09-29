@@ -22,6 +22,7 @@ import type {
   ConversationMessage,
   ProjectMetadata,
   BranchStatus,
+  WorktreeInfo,
 } from '../shared/types'
 
 const execAsync = promisify(exec)
@@ -285,6 +286,101 @@ const saveProjectPromptHistory = (projectPath: string, prompts: any[]) => {
     writeFileSync(filePath, JSON.stringify(prompts, null, 2))
   } catch (error) {
     console.error('Error saving project prompt history:', error)
+  }
+}
+
+// Worktree utility functions
+const generateShortUuid = (): string => {
+  const timestamp = Date.now().toString(36)
+  const random = Math.random().toString(36).substring(2, 6)
+  return `${timestamp}-${random}`.substring(0, 8)
+}
+
+const sanitizePromptName = (prompt: string): string => {
+  return prompt
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '') // Remove special characters
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .substring(0, 30) // Limit length
+    .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+}
+
+const createWorktree = async (
+  projectPath: string,
+  branch: string,
+  promptText: string,
+  promptId: string
+): Promise<WorktreeInfo> => {
+  console.log('Creating worktree with params:', { projectPath, branch, promptText: promptText.substring(0, 50), promptId })
+
+  // Validate and sanitize branch name
+  let validBranch = branch.trim()
+
+  // Check if branch exists in the repository
+  try {
+    await execAsync(`git rev-parse --verify "${validBranch}"`, {
+      cwd: projectPath,
+    })
+  } catch (error) {
+    console.log(`Branch "${validBranch}" doesn't exist, falling back to default branch`)
+    // Get the default branch if the specified branch doesn't exist
+    try {
+      const { stdout } = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
+        cwd: projectPath,
+      })
+      validBranch = stdout.trim().replace('refs/remotes/origin/', '')
+    } catch {
+      // Fallback to 'main' if we can't determine the default branch
+      validBranch = 'main'
+    }
+  }
+
+  const projectName = basename(projectPath)
+  const sanitizedPromptName = sanitizePromptName(promptText)
+  const shortUuid = generateShortUuid()
+  const worktreeName = `${sanitizedPromptName}-${shortUuid}`
+
+  const almondcoderDir = join(homedir(), '.almondcoder')
+  if (!existsSync(almondcoderDir)) {
+    mkdirSync(almondcoderDir, { recursive: true })
+  }
+
+  const projectWorktreeDir = join(almondcoderDir, projectName)
+  if (!existsSync(projectWorktreeDir)) {
+    mkdirSync(projectWorktreeDir, { recursive: true })
+  }
+
+  const worktreePath = join(projectWorktreeDir, worktreeName)
+
+  try {
+    // Create the worktree using the validated branch
+    await execAsync(`git worktree add -f "${worktreePath}" "${validBranch}"`, {
+      cwd: projectPath,
+    })
+
+    console.log(`Created worktree: ${worktreePath} from branch: ${validBranch}`)
+
+    return {
+      worktreePath,
+      promptId,
+      projectName,
+      sanitizedPromptName,
+      shortUuid,
+    }
+  } catch (error: any) {
+    console.error('Error creating worktree:', error)
+    throw new Error(`Failed to create worktree: ${error.message}`)
+  }
+}
+
+const removeWorktree = async (worktreePath: string): Promise<void> => {
+  try {
+    // Remove the worktree
+    await execAsync(`git worktree remove "${worktreePath}"`)
+    console.log(`Removed worktree: ${worktreePath}`)
+  } catch (error: any) {
+    console.error('Error removing worktree:', error)
+    // Don't throw error for cleanup, just log it
   }
 }
 
@@ -647,9 +743,9 @@ ipcMain.handle(
             }
           } else {
             if (mode === 'current') {
-              currentContent += line + '\n'
+              currentContent += `${line}\n`
             } else {
-              incomingContent += line + '\n'
+              incomingContent += `${line}\n`
             }
           }
         }
@@ -721,83 +817,107 @@ ipcMain.handle(
 )
 
 // Execute shell commands with real-time streaming
-ipcMain.handle('execute-command-stream', async (event, command) => {
-  return new Promise((resolve, reject) => {
-    console.log('Executing streaming command:', command)
+ipcMain.handle(
+  'execute-command-stream',
+  async (event, command, workingDirectory = undefined) => {
+    return new Promise((resolve, reject) => {
+      console.log('Executing streaming command:', command)
+      if (workingDirectory) {
+        console.log('Working directory:', workingDirectory)
+      }
 
-    // Use shell directly instead of splitting command
-    const childProcess = spawn('sh', ['-c', command], {
-      timeout: 120000, // 2 minute timeout
-      stdio: ['ignore', 'pipe', 'pipe'], // Explicitly set stdio
-      env: { ...process.env }, // Inherit environment
-    })
+      // Use shell directly instead of splitting command
+      const spawnOptions: any = {
+        timeout: 120000, // 2 minute timeout
+        stdio: ['ignore', 'pipe', 'pipe'], // Explicitly set stdio
+        env: { ...process.env }, // Inherit environment
+      }
 
-    let stdout = ''
-    let stderr = ''
+      // Add working directory if provided
+      if (workingDirectory) {
+        spawnOptions.cwd = workingDirectory
+      }
 
-    childProcess.stdout?.on('data', data => {
-      const chunk = data.toString()
-      stdout += chunk
-      // Send real-time data to renderer
-      event.sender.send('command-output', { type: 'stdout', data: chunk })
-    })
+      const childProcess = spawn('sh', ['-c', command], spawnOptions)
 
-    childProcess.stderr?.on('data', data => {
-      const chunk = data.toString()
-      stderr += chunk
-      // Send real-time data to renderer
-      event.sender.send('command-output', { type: 'stderr', data: chunk })
-    })
+      let stdout = ''
+      let stderr = ''
 
-    childProcess.on('close', code => {
-      if (code === 0) {
-        resolve(stdout + (stderr ? '\n' + stderr : ''))
-      } else {
-        reject(
-          new Error(
-            `Command failed with code ${code}: ${stderr || 'Unknown error'}`
+      childProcess.stdout?.on('data', data => {
+        const chunk = data.toString()
+        stdout += chunk
+        // Send real-time data to renderer
+        event.sender.send('command-output', { type: 'stdout', data: chunk })
+      })
+
+      childProcess.stderr?.on('data', data => {
+        const chunk = data.toString()
+        stderr += chunk
+        // Send real-time data to renderer
+        event.sender.send('command-output', { type: 'stderr', data: chunk })
+      })
+
+      childProcess.on('close', code => {
+        if (code === 0) {
+          resolve(stdout + (stderr ? `\n${stderr}` : ''))
+        } else {
+          reject(
+            new Error(
+              `Command failed with code ${code}: ${stderr || 'Unknown error'}`
+            )
           )
-        )
-      }
-    })
+        }
+      })
 
-    childProcess.on('error', error => {
-      reject(new Error(`Command failed: ${error.message}`))
-    })
+      childProcess.on('error', error => {
+        reject(new Error(`Command failed: ${error.message}`))
+      })
 
-    // Handle timeout
-    setTimeout(() => {
-      if (!childProcess.killed) {
-        childProcess.kill('SIGKILL')
-        reject(new Error('Command timed out after 2 minutes'))
-      }
-    }, 120000)
-  })
-})
+      // Handle timeout
+      setTimeout(() => {
+        if (!childProcess.killed) {
+          childProcess.kill('SIGKILL')
+          reject(new Error('Command timed out after 2 minutes'))
+        }
+      }, 120000)
+    })
+  }
+)
 
 // Keep the original execute-command for compatibility
-ipcMain.handle('execute-command', async (event, command) => {
-  try {
-    const { stdout, stderr } = await execAsync(command, {
-      timeout: 120000, // 2 minute timeout
-      maxBuffer: 1024 * 1024 * 10, // 10MB buffer for large outputs
-    })
+ipcMain.handle(
+  'execute-command',
+  async (event, command, workingDirectory = undefined) => {
+    try {
+      const execOptions: any = {
+        timeout: 120000, // 2 minute timeout
+        maxBuffer: 1024 * 1024 * 10, // 10MB buffer for large outputs
+      }
 
-    // Return both stdout and stderr, Claude might output to either
-    return stdout + (stderr ? '\n' + stderr : '')
-  } catch (error: any) {
-    console.error('Error executing command:', error)
+      // Add working directory if provided
+      if (workingDirectory) {
+        execOptions.cwd = workingDirectory
+        console.log('Executing command in directory:', workingDirectory)
+      }
 
-    // Include both stdout and stderr even on error, as Claude might still provide useful output
-    const output =
-      (error.stdout || '') + (error.stderr ? '\n' + error.stderr : '')
-    if (output.trim()) {
-      return output
+      const { stdout, stderr } = await execAsync(command, execOptions)
+
+      // Return both stdout and stderr, Claude might output to either
+      return stdout + (stderr ? `\n${stderr}` : '')
+    } catch (error: any) {
+      console.error('Error executing command:', error)
+
+      // Include both stdout and stderr even on error, as Claude might still provide useful output
+      const output =
+        (error.stdout || '') + (error.stderr ? `\n${error.stderr}` : '')
+      if (output.trim()) {
+        return output
+      }
+
+      throw new Error(`Command failed: ${error.message}`)
     }
-
-    throw new Error(`Command failed: ${error.message}`)
   }
-})
+)
 
 // Get project files
 ipcMain.handle('get-project-files', async (event, projectPath) => {
@@ -921,14 +1041,14 @@ ipcMain.handle('install-claude', async () => {
 
     return {
       success: true,
-      output: stdout + (stderr ? '\n' + stderr : ''),
+      output: stdout + (stderr ? `\n${stderr}` : ''),
     }
   } catch (error: any) {
     console.error('Error installing Claude:', error)
     return {
       success: false,
       error: error.message,
-      output: (error.stdout || '') + (error.stderr ? '\n' + error.stderr : ''),
+      output: (error.stdout || '') + (error.stderr ? `\n${error.stderr}` : ''),
     }
   }
 })
@@ -946,7 +1066,7 @@ ipcMain.handle('setup-claude-path', async () => {
 
     return {
       success: true,
-      output: stdout + (stderr ? '\n' + stderr : ''),
+      output: stdout + (stderr ? `\n${stderr}` : ''),
     }
   } catch (error: any) {
     console.error('Error setting up Claude PATH:', error)
@@ -962,7 +1082,7 @@ ipcMain.handle('setup-claude-path', async () => {
 
       return {
         success: true,
-        output: stdout + (stderr ? '\n' + stderr : ''),
+        output: stdout + (stderr ? `\n${stderr}` : ''),
         shell: 'bash',
       }
     } catch (bashError: any) {
@@ -970,8 +1090,48 @@ ipcMain.handle('setup-claude-path', async () => {
         success: false,
         error: error.message,
         output:
-          (error.stdout || '') + (error.stderr ? '\n' + error.stderr : ''),
+          (error.stdout || '') + (error.stderr ? `\n${error.stderr}` : ''),
       }
+    }
+  }
+})
+
+// Worktree IPC handlers
+ipcMain.handle(
+  'create-worktree',
+  async (event, projectPath, branch, promptText, promptId) => {
+    try {
+      const worktreeInfo = await createWorktree(
+        projectPath,
+        branch,
+        promptText,
+        promptId
+      )
+      return {
+        success: true,
+        worktreeInfo,
+      }
+    } catch (error: any) {
+      console.error('Error in create-worktree IPC handler:', error)
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+  }
+)
+
+ipcMain.handle('cleanup-worktree', async (event, worktreePath) => {
+  try {
+    await removeWorktree(worktreePath)
+    return {
+      success: true,
+    }
+  } catch (error: any) {
+    console.error('Error in cleanup-worktree IPC handler:', error)
+    return {
+      success: false,
+      error: error.message,
     }
   }
 })

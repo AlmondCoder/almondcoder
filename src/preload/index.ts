@@ -37,11 +37,12 @@ const API = {
   }) => ipcRenderer.invoke('perform-merge', params),
   cloneRepository: (repoUrl: string) =>
     ipcRenderer.invoke('clone-repository', repoUrl),
-  executeCommand: (command: string) =>
-    ipcRenderer.invoke('execute-command', command),
+  executeCommand: (command: string, workingDirectory?: string) =>
+    ipcRenderer.invoke('execute-command', command, workingDirectory),
   executeCommandStream: (
     command: string,
-    onOutput?: (data: { type: string; data: string }) => void
+    onOutput?: (data: { type: string; data: string }) => void,
+    workingDirectory?: string
   ) => {
     if (onOutput) {
       const handler = (_event: any, data: { type: string; data: string }) =>
@@ -49,12 +50,16 @@ const API = {
       ipcRenderer.on('command-output', handler)
 
       return ipcRenderer
-        .invoke('execute-command-stream', command)
+        .invoke('execute-command-stream', command, workingDirectory)
         .finally(() => {
           ipcRenderer.removeListener('command-output', handler)
         })
     }
-    return ipcRenderer.invoke('execute-command-stream', command)
+    return ipcRenderer.invoke(
+      'execute-command-stream',
+      command,
+      workingDirectory
+    )
   },
   getProjectFiles: (projectPath: string) =>
     ipcRenderer.invoke('get-project-files', projectPath),
@@ -86,6 +91,22 @@ const API = {
     ),
   getCurrentBranchStatus: (projectPath: string, branchName: string) =>
     ipcRenderer.invoke('get-current-branch-status', projectPath, branchName),
+  // Worktree methods
+  createWorktree: (
+    projectPath: string,
+    branch: string,
+    promptText: string,
+    promptId: string
+  ) =>
+    ipcRenderer.invoke(
+      'create-worktree',
+      projectPath,
+      branch,
+      promptText,
+      promptId
+    ),
+  cleanupWorktree: (worktreePath: string) =>
+    ipcRenderer.invoke('cleanup-worktree', worktreePath),
   // Legacy methods for backward compatibility
   getProjectPromptHistory: (projectPath: string) =>
     ipcRenderer.invoke('get-project-prompt-history', projectPath),
