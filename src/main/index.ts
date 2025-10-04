@@ -9,9 +9,11 @@ import {
   statSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { exec, spawn } from 'node:child_process'
+import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
+import * as pty from 'node-pty'
+import stripAnsi from 'strip-ansi'
 
 import { makeAppWithSingleInstanceLock } from 'lib/electron-app/factories/app/instance'
 import { makeAppSetup } from 'lib/electron-app/factories/app/setup'
@@ -169,9 +171,6 @@ const loadEnhancedPromptHistory = (
         prompts.push({
           ...parsed,
           startExecutionTime: new Date(parsed.startExecutionTime),
-          endExecutionTime: parsed.endExecutionTime
-            ? new Date(parsed.endExecutionTime)
-            : null,
           createdAt: new Date(parsed.createdAt),
           updatedAt: new Date(parsed.updatedAt),
         })
@@ -196,6 +195,51 @@ const saveEnhancedPrompt = (promptData: EnhancedPromptHistoryItem) => {
   }
 }
 
+const validateConversationData = (data: any): data is ConversationHistory => {
+  if (!data || typeof data !== 'object') return false
+  if (typeof data.promptId !== 'string') return false
+  if (typeof data.projectPath !== 'string') return false
+  if (!Array.isArray(data.messages)) return false
+
+  // worktreePath is optional but if present, should be a string
+  if (data.worktreePath !== undefined && typeof data.worktreePath !== 'string')
+    return false
+
+  // parentWorktreePath is optional but if present, should be a string
+  if (data.parentWorktreePath !== undefined && typeof data.parentWorktreePath !== 'string')
+    return false
+
+  // Validate each message
+  for (const msg of data.messages) {
+    if (!msg || typeof msg !== 'object') return false
+    if (typeof msg.id !== 'string') return false
+    if (typeof msg.content !== 'string') return false
+    if (!['user', 'system', 'assistant'].includes(msg.type)) return false
+    if (!msg.timestamp) return false
+  }
+
+  return true
+}
+
+const validateWorktreePath = async (worktreePath: string): Promise<boolean> => {
+  try {
+    if (!existsSync(worktreePath)) {
+      console.log('Worktree path does not exist:', worktreePath)
+      return false
+    }
+
+    // Check if it's a valid git worktree
+    const { stdout } = await execAsync('git worktree list --porcelain', {
+      cwd: worktreePath,
+    })
+
+    return stdout.includes(worktreePath)
+  } catch (error) {
+    console.error('Error validating worktree path:', error)
+    return false
+  }
+}
+
 const loadConversationHistory = (
   projectPath: string,
   promptId: string
@@ -204,8 +248,47 @@ const loadConversationHistory = (
     const filePath = getConversationFilePath(projectPath, promptId)
     if (existsSync(filePath)) {
       const data = readFileSync(filePath, 'utf8')
-      const parsed = JSON.parse(data)
-      return {
+
+      // Try to parse JSON
+      let parsed
+      try {
+        parsed = JSON.parse(data)
+      } catch (parseError) {
+        console.error(
+          'Invalid JSON in conversation file:',
+          filePath,
+          parseError
+        )
+        // Try to recover by creating backup and returning null
+        const backupPath = `${filePath}.backup.${Date.now()}`
+        try {
+          writeFileSync(backupPath, data)
+          console.log('Created backup of corrupted file:', backupPath)
+        } catch (backupError) {
+          console.error('Failed to create backup:', backupError)
+        }
+        return null
+      }
+
+      // Validate the parsed data structure
+      if (!validateConversationData(parsed)) {
+        console.error('Invalid conversation data structure in file:', filePath)
+        // Create backup and return null
+        const backupPath = `${filePath}.invalid.${Date.now()}`
+        try {
+          writeFileSync(backupPath, JSON.stringify(parsed, null, 2))
+          console.log(
+            'Created backup of invalid conversation file:',
+            backupPath
+          )
+        } catch (backupError) {
+          console.error('Failed to create backup:', backupError)
+        }
+        return null
+      }
+
+      // Convert dates and create conversation object
+      const conversation = {
         ...parsed,
         messages: parsed.messages.map((msg: any) => ({
           ...msg,
@@ -214,6 +297,24 @@ const loadConversationHistory = (
         createdAt: new Date(parsed.createdAt),
         updatedAt: new Date(parsed.updatedAt),
       }
+
+      // Validate worktree path if present (async validation, don't block loading)
+      if (conversation.worktreePath) {
+        validateWorktreePath(conversation.worktreePath)
+          .then(isValid => {
+            if (!isValid) {
+              console.warn(
+                `Conversation ${promptId} references invalid worktree: ${conversation.worktreePath}`
+              )
+              // Could optionally clear the worktreePath here or notify the user
+            }
+          })
+          .catch(error => {
+            console.error('Error validating worktree for conversation:', error)
+          })
+      }
+
+      return conversation
     }
   } catch (error) {
     console.error('Error loading conversation history:', error)
@@ -223,13 +324,40 @@ const loadConversationHistory = (
 
 const saveConversationHistory = (conversationData: ConversationHistory) => {
   try {
+    // Validate conversation data before saving
+    if (!validateConversationData(conversationData)) {
+      throw new Error('Invalid conversation data structure')
+    }
+
     const filePath = getConversationFilePath(
       conversationData.projectPath,
       conversationData.promptId
     )
+
+    // Ensure the directory exists
+    ensureProjectFolderStructure(conversationData.projectPath)
+
+    // Create backup if file already exists
+    if (existsSync(filePath)) {
+      try {
+        const existingData = readFileSync(filePath, 'utf8')
+        const backupPath = `${filePath}.backup`
+        writeFileSync(backupPath, existingData)
+      } catch (backupError) {
+        // Don't fail save if backup creation fails
+        console.warn(
+          'Could not create backup of existing conversation file:',
+          backupError
+        )
+      }
+    }
+
+    // Write the conversation data
     writeFileSync(filePath, JSON.stringify(conversationData, null, 2))
+    console.log('Successfully saved conversation history:', filePath)
   } catch (error) {
     console.error('Error saving conversation history:', error)
+    throw error // Re-throw so caller can handle the error
   }
 }
 
@@ -309,29 +437,92 @@ const createWorktree = async (
   projectPath: string,
   branch: string,
   promptText: string,
-  promptId: string
+  promptId: string,
+  parentWorktreePath?: string
 ): Promise<WorktreeInfo> => {
-  console.log('Creating worktree with params:', { projectPath, branch, promptText: promptText.substring(0, 50), promptId })
+  console.log('Creating worktree with params:', {
+    projectPath,
+    branch,
+    promptText: promptText.substring(0, 50),
+    promptId,
+    parentWorktreePath,
+  })
 
-  // Validate and sanitize branch name
+  // STEP 1: Check if repository has any commits
+  let hasCommits = true
+  try {
+    await execAsync('git rev-parse HEAD', { cwd: projectPath })
+  } catch (error) {
+    hasCommits = false
+    console.log('Repository has no commits yet, creating initial commit')
+  }
+
+  // STEP 2: Create initial commit if needed
+  if (!hasCommits) {
+    try {
+      // Try to create initial commit with --allow-empty
+      await execAsync('git commit --allow-empty -m "Initial commit"', {
+        cwd: projectPath,
+      })
+      console.log('Created initial empty commit')
+    } catch (commitError: any) {
+      console.error('Error creating initial commit:', commitError)
+      throw new Error(
+        `Cannot create worktree: Repository has no commits and initial commit failed: ${commitError.message}`
+      )
+    }
+  }
+
+  // STEP 3: Validate and sanitize branch name
   let validBranch = branch.trim()
 
-  // Check if branch exists in the repository
+  // STEP 4: Check if branch exists in the repository
   try {
     await execAsync(`git rev-parse --verify "${validBranch}"`, {
       cwd: projectPath,
     })
+    console.log(`Branch "${validBranch}" exists`)
   } catch (error) {
-    console.log(`Branch "${validBranch}" doesn't exist, falling back to default branch`)
-    // Get the default branch if the specified branch doesn't exist
+    console.log(
+      `Branch "${validBranch}" doesn't exist, attempting to create or find default branch`
+    )
+
+    // Try to get current branch name
     try {
-      const { stdout } = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
-        cwd: projectPath,
-      })
-      validBranch = stdout.trim().replace('refs/remotes/origin/', '')
-    } catch {
-      // Fallback to 'main' if we can't determine the default branch
-      validBranch = 'main'
+      const { stdout: currentBranchOutput } = await execAsync(
+        'git rev-parse --abbrev-ref HEAD',
+        { cwd: projectPath }
+      )
+      const currentBranch = currentBranchOutput.trim()
+
+      // If we want 'main' but we're on a different branch, rename it
+      if (validBranch === 'main' && currentBranch !== 'main') {
+        try {
+          await execAsync('git branch -M main', { cwd: projectPath })
+          console.log(`Renamed branch ${currentBranch} to main`)
+          validBranch = 'main'
+        } catch (renameError) {
+          console.error('Error renaming branch:', renameError)
+          // Use current branch if rename fails
+          validBranch = currentBranch
+        }
+      } else {
+        // Use current branch
+        validBranch = currentBranch
+      }
+    } catch (currentBranchError) {
+      console.error('Error getting current branch:', currentBranchError)
+      // Last resort: try to get default branch from remote
+      try {
+        const { stdout } = await execAsync(
+          'git symbolic-ref refs/remotes/origin/HEAD',
+          { cwd: projectPath }
+        )
+        validBranch = stdout.trim().replace('refs/remotes/origin/', '')
+      } catch {
+        // Absolute fallback
+        validBranch = 'main'
+      }
     }
   }
 
@@ -353,12 +544,37 @@ const createWorktree = async (
   const worktreePath = join(projectWorktreeDir, worktreeName)
 
   try {
-    // Create the worktree using the validated branch
-    await execAsync(`git worktree add -f "${worktreePath}" "${validBranch}"`, {
-      cwd: projectPath,
-    })
+    // Create a unique branch name for this worktree
+    // Format: worktree/<prompt-name>-<uuid>
+    const uniqueBranchName = `worktree/${sanitizedPromptName}-${shortUuid}`
 
-    console.log(`Created worktree: ${worktreePath} from branch: ${validBranch}`)
+    // If we have a parent worktree, create from it
+    if (parentWorktreePath && existsSync(parentWorktreePath)) {
+      console.log(`Creating worktree from parent: ${parentWorktreePath}`)
+
+      // Create worktree from the parent worktree's current state
+      // Use the parent worktree as the working directory to get its current branch/commit
+      const { stdout: parentCommit } = await execAsync('git rev-parse HEAD', {
+        cwd: parentWorktreePath,
+      })
+
+      const commitHash = parentCommit.trim()
+      console.log(`Parent worktree is at commit: ${commitHash}`)
+
+      // Create new worktree with a new branch based on the parent's commit
+      await execAsync(`git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${commitHash}"`, {
+        cwd: projectPath,
+      })
+
+      console.log(`Created worktree: ${worktreePath} with branch ${uniqueBranchName} from parent worktree commit: ${commitHash}`)
+    } else {
+      // Create new branch from the validated branch and create worktree on it
+      await execAsync(`git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${validBranch}"`, {
+        cwd: projectPath,
+      })
+
+      console.log(`Created worktree: ${worktreePath} with branch ${uniqueBranchName} from branch: ${validBranch}`)
+    }
 
     return {
       worktreePath,
@@ -366,6 +582,7 @@ const createWorktree = async (
       projectName,
       sanitizedPromptName,
       shortUuid,
+      branchName: uniqueBranchName,
     }
   } catch (error: any) {
     console.error('Error creating worktree:', error)
@@ -465,24 +682,51 @@ ipcMain.handle(
 
 ipcMain.handle(
   'add-conversation-message',
-  (event, projectPath, promptId, message: ConversationMessage) => {
-    let conversation = loadConversationHistory(projectPath, promptId)
+  async (event, projectPath, promptId, message: ConversationMessage) => {
+    try {
+      let conversation = loadConversationHistory(projectPath, promptId)
 
-    if (!conversation) {
-      conversation = {
-        promptId,
-        projectPath,
-        messages: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      if (!conversation) {
+        // Create new conversation if it doesn't exist
+        conversation = {
+          promptId,
+          projectPath,
+          worktreePath: undefined,
+          messages: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      }
+
+      // Validate message structure before adding
+      if (
+        !message.id ||
+        !message.content ||
+        !message.type ||
+        !message.timestamp
+      ) {
+        throw new Error('Invalid message structure')
+      }
+
+      // Check if message with this ID already exists to prevent duplicates
+      const messageExists = conversation.messages.some(m => m.id === message.id)
+      if (messageExists) {
+        console.log(`Message with ID ${message.id} already exists, skipping duplicate`)
+        return { success: true, skipped: true }
+      }
+
+      conversation.messages.push(message)
+      conversation.updatedAt = new Date()
+
+      await saveConversationHistory(conversation)
+      return { success: true }
+    } catch (error) {
+      console.error('Error adding conversation message:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       }
     }
-
-    conversation.messages.push(message)
-    conversation.updatedAt = new Date()
-
-    saveConversationHistory(conversation)
-    return true
   }
 )
 
@@ -517,15 +761,16 @@ ipcMain.handle('is-git-repository', async (event, path) => {
 
 ipcMain.handle('get-git-branches', async (event, path) => {
   try {
-    const { stdout } = await execAsync('git branch -a', { cwd: path })
+    const { stdout } = await execAsync(
+      "git for-each-ref --format='%(refname:short)' refs/heads --exclude='refs/heads/worktree/**'",
+      { cwd: path }
+    )
     const branches = stdout
       .split('\n')
-      .map(branch =>
-        branch.replace(/^\*?\s*/, '').replace(/^remotes\/origin\//, '')
-      )
-      .filter(branch => branch && !branch.startsWith('HEAD'))
+      .map(branch => branch.trim().replace(/^'|'$/g, ''))
+      .filter(branch => branch && !branch.startsWith('worktree/'))
       .filter((branch, index, array) => array.indexOf(branch) === index)
-    return branches
+    return branches.length > 0 ? branches : ['main']
   } catch (error) {
     console.error('Error getting git branches:', error)
     return ['main']
@@ -601,6 +846,26 @@ ipcMain.handle('clone-repository', async (event, repoUrl) => {
 // Get detailed branch information with relationships
 ipcMain.handle('get-git-branch-graph', async (event, path) => {
   try {
+    // Check if repository has any commits
+    let hasCommits = true
+    let currentBranchName = 'main'
+
+    try {
+      await execAsync('git rev-parse HEAD', { cwd: path })
+    } catch (error) {
+      hasCommits = false
+      console.log('Repository has no commits yet, returning empty branch graph')
+    }
+
+    if (!hasCommits) {
+      // Return empty branch graph for repositories with no commits
+      return {
+        branches: [],
+        relationships: [],
+        currentBranch: 'main',
+      }
+    }
+
     // Get all branches with their commit info
     const { stdout: branchInfo } = await execAsync(
       'git for-each-ref --format="%(refname:short)|%(objectname)|%(authordate:iso8601)|%(authorname)|%(subject)" refs/heads/ refs/remotes/',
@@ -608,10 +873,16 @@ ipcMain.handle('get-git-branch-graph', async (event, path) => {
     )
 
     // Get current branch
-    const { stdout: currentBranch } = await execAsync(
-      'git rev-parse --abbrev-ref HEAD',
-      { cwd: path }
-    )
+    try {
+      const { stdout: currentBranch } = await execAsync(
+        'git rev-parse --abbrev-ref HEAD',
+        { cwd: path }
+      )
+      currentBranchName = currentBranch.trim()
+    } catch (error) {
+      console.error('Error getting current branch:', error)
+      currentBranchName = 'main'
+    }
 
     // Get merge base information to determine relationships
     const branches = branchInfo
@@ -627,8 +898,8 @@ ipcMain.handle('get-git-branch-graph', async (event, path) => {
           subject,
           isRemote: name.startsWith('origin/'),
           isCurrent:
-            name === currentBranch.trim() ||
-            name === `origin/${currentBranch.trim()}`,
+            name === currentBranchName ||
+            name === `origin/${currentBranchName}`,
         }
       })
 
@@ -686,7 +957,7 @@ ipcMain.handle('get-git-branch-graph', async (event, path) => {
     return {
       branches: uniqueBranches,
       relationships,
-      currentBranch: currentBranch.trim(),
+      currentBranch: currentBranchName,
     }
   } catch (error) {
     console.error('Error getting git branch graph:', error)
@@ -781,10 +1052,49 @@ ipcMain.handle(
   'perform-merge',
   async (event, { path, sourceBranch, targetBranch, resolutions }) => {
     try {
-      // Switch to target branch
-      await execAsync(`git checkout ${targetBranch}`, { cwd: path })
+      // Get the current branch in the main repository
+      const { stdout: currentBranch } = await execAsync(
+        'git rev-parse --abbrev-ref HEAD',
+        { cwd: path }
+      )
+      const currentBranchName = currentBranch.trim()
 
-      // Attempt merge
+      // Check if we need to switch branches
+      if (currentBranchName !== targetBranch) {
+        try {
+          // Try direct checkout first
+          await execAsync(`git checkout ${targetBranch}`, { cwd: path })
+        } catch (checkoutError: any) {
+          // If checkout fails due to worktree conflict, use a workaround
+          if (checkoutError.message.includes('already used by worktree')) {
+            console.log('Target branch is in a worktree, using merge without checkout')
+
+            // Get the commit hash of the source branch
+            const { stdout: sourceCommit } = await execAsync(
+              `git rev-parse ${sourceBranch}`,
+              { cwd: path }
+            )
+
+            // Get the commit hash of the target branch
+            const { stdout: targetCommit } = await execAsync(
+              `git rev-parse ${targetBranch}`,
+              { cwd: path }
+            )
+
+            // Update the target branch to include the merge without checking it out
+            await execAsync(
+              `git update-ref refs/heads/${targetBranch} $(git commit-tree $(git rev-parse ${targetBranch}^{tree}) -p ${targetCommit.trim()} -p ${sourceCommit.trim()} -m "Merge ${sourceBranch} into ${targetBranch}")`,
+              { cwd: path }
+            )
+
+            console.log(`Merged ${sourceBranch} into ${targetBranch} without checkout`)
+            return { success: true }
+          }
+          throw checkoutError
+        }
+      }
+
+      // Attempt merge (if we successfully checked out)
       try {
         await execAsync(`git merge ${sourceBranch} --no-ff`, { cwd: path })
         return { success: true }
@@ -816,7 +1126,7 @@ ipcMain.handle(
   }
 )
 
-// Execute shell commands with real-time streaming
+// Execute shell commands with real-time streaming using PTY for interactive output
 ipcMain.handle(
   'execute-command-stream',
   async (event, command, workingDirectory = undefined) => {
@@ -826,59 +1136,61 @@ ipcMain.handle(
         console.log('Working directory:', workingDirectory)
       }
 
-      // Use shell directly instead of splitting command
-      const spawnOptions: any = {
-        timeout: 120000, // 2 minute timeout
-        stdio: ['ignore', 'pipe', 'pipe'], // Explicitly set stdio
-        env: { ...process.env }, // Inherit environment
-      }
+      // Determine the shell to use
+      const shell = process.env.SHELL || '/bin/sh'
 
-      // Add working directory if provided
-      if (workingDirectory) {
-        spawnOptions.cwd = workingDirectory
-      }
-
-      const childProcess = spawn('sh', ['-c', command], spawnOptions)
-
-      let stdout = ''
-      let stderr = ''
-
-      childProcess.stdout?.on('data', data => {
-        const chunk = data.toString()
-        stdout += chunk
-        // Send real-time data to renderer
-        event.sender.send('command-output', { type: 'stdout', data: chunk })
+      // Use PTY for proper interactive terminal emulation
+      const ptyProcess = pty.spawn(shell, ['-c', command], {
+        name: 'dumb',
+        cols: 120,
+        rows: 30,
+        cwd: workingDirectory || process.cwd(),
+        env: {
+          ...process.env,
+          TERM: 'dumb', // Disable ANSI colors and formatting
+          NO_COLOR: '1', // Standard environment variable to disable colors
+          COLORTERM: '', // Remove color terminal support
+          FORCE_COLOR: '0', // Disable forced colors
+        },
       })
 
-      childProcess.stderr?.on('data', data => {
-        const chunk = data.toString()
-        stderr += chunk
-        // Send real-time data to renderer
-        event.sender.send('command-output', { type: 'stderr', data: chunk })
+      let fullOutput = ''
+      let timeoutHandle: NodeJS.Timeout | null = null
+
+      // Handle data from PTY
+      ptyProcess.onData((data) => {
+        // Send raw data with ANSI codes to renderer - xterm.js will handle them
+        fullOutput += data
+        event.sender.send('command-output', {
+          type: 'stdout',
+          data: data,
+          rawData: true, // Signal that this contains ANSI codes
+        })
       })
 
-      childProcess.on('close', code => {
-        if (code === 0) {
-          resolve(stdout + (stderr ? `\n${stderr}` : ''))
+      // Handle process exit
+      ptyProcess.onExit(({ exitCode, signal }) => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle)
+        }
+
+        // Strip ANSI for the final output return value
+        const cleanOutput = stripAnsi(fullOutput)
+        if (exitCode === 0) {
+          resolve(cleanOutput)
         } else {
           reject(
             new Error(
-              `Command failed with code ${code}: ${stderr || 'Unknown error'}`
+              `Command failed with code ${exitCode}${signal ? ` (signal: ${signal})` : ''}`
             )
           )
         }
       })
 
-      childProcess.on('error', error => {
-        reject(new Error(`Command failed: ${error.message}`))
-      })
-
-      // Handle timeout
-      setTimeout(() => {
-        if (!childProcess.killed) {
-          childProcess.kill('SIGKILL')
-          reject(new Error('Command timed out after 2 minutes'))
-        }
+      // Handle timeout (2 minutes)
+      timeoutHandle = setTimeout(() => {
+        ptyProcess.kill()
+        reject(new Error('Command timed out after 2 minutes'))
       }, 120000)
     })
   }
@@ -1099,13 +1411,14 @@ ipcMain.handle('setup-claude-path', async () => {
 // Worktree IPC handlers
 ipcMain.handle(
   'create-worktree',
-  async (event, projectPath, branch, promptText, promptId) => {
+  async (event, projectPath, branch, promptText, promptId, parentWorktreePath) => {
     try {
       const worktreeInfo = await createWorktree(
         projectPath,
         branch,
         promptText,
-        promptId
+        promptId,
+        parentWorktreePath
       )
       return {
         success: true,
@@ -1132,6 +1445,207 @@ ipcMain.handle('cleanup-worktree', async (event, worktreePath) => {
     return {
       success: false,
       error: error.message,
+    }
+  }
+})
+
+// Validate if a worktree path is still valid
+ipcMain.handle('validate-worktree', async (event, worktreePath) => {
+  try {
+    const isValid = await validateWorktreePath(worktreePath)
+    return {
+      success: true,
+      isValid,
+    }
+  } catch (error: any) {
+    console.error('Error in validate-worktree IPC handler:', error)
+    return {
+      success: false,
+      error: error.message,
+      isValid: false,
+    }
+  }
+})
+
+// Capture AI session ID from filesystem
+const captureClaudeSessionId = async (projectPath: string): Promise<string | null> => {
+  try {
+    // Sanitize project path for Claude's directory structure
+    const sanitizedPath = projectPath.replace(/\//g, '-')
+    const claudeSessionsDir = join(homedir(), '.claude', 'projects', sanitizedPath)
+
+    if (!existsSync(claudeSessionsDir)) {
+      console.log('Claude sessions directory does not exist:', claudeSessionsDir)
+      return null
+    }
+
+    // Get list of session files
+    const files = readdirSync(claudeSessionsDir)
+    const sessionFiles = files
+      .filter(file => file.endsWith('.jsonl'))
+      .map(file => ({
+        name: file,
+        mtime: statSync(join(claudeSessionsDir, file)).mtime.getTime(),
+      }))
+      .sort((a, b) => b.mtime - a.mtime)
+
+    if (sessionFiles.length === 0) {
+      console.log('No Claude session files found')
+      return null
+    }
+
+    // Get the newest session file
+    const newestSession = sessionFiles[0]
+    const sessionId = newestSession.name.replace('.jsonl', '')
+
+    console.log('Captured Claude session ID:', sessionId)
+    return sessionId
+  } catch (error) {
+    console.error('Error capturing Claude session ID:', error)
+    return null
+  }
+}
+
+ipcMain.handle('capture-ai-session-id', async (event, projectPath, aiTool) => {
+  try {
+    let sessionId: string | null = null
+
+    // Only Claude Code is supported for now
+    if (aiTool === 'claude-code') {
+      sessionId = await captureClaudeSessionId(projectPath)
+    }
+    // TODO: Add support for cursor-cli and codex session capture
+
+    return {
+      success: true,
+      sessionId,
+    }
+  } catch (error: any) {
+    console.error('Error in capture-ai-session-id IPC handler:', error)
+    return {
+      success: false,
+      error: error.message,
+      sessionId: null,
+    }
+  }
+})
+
+// Get list of existing worktrees for a project
+ipcMain.handle('get-project-worktrees', async (event, projectPath) => {
+  try {
+    const { conversationsDir } = ensureProjectFolderStructure(projectPath)
+    const conversationFiles = readdirSync(conversationsDir).filter(file =>
+      file.endsWith('.json')
+    )
+
+    const worktrees: Array<{
+      promptId: string
+      worktreePath: string
+      prompt: string
+      createdAt: Date
+      branch: string
+    }> = []
+
+    for (const file of conversationFiles) {
+      try {
+        const promptId = file.replace('.json', '')
+        const conversation = loadConversationHistory(projectPath, promptId)
+
+        if (conversation?.worktreePath) {
+          // Validate the worktree still exists
+          const isValid = await validateWorktreePath(conversation.worktreePath)
+
+          if (isValid) {
+            // Load the prompt details
+            const prompt = loadEnhancedPromptHistory(projectPath).find(
+              p => p.id === promptId
+            )
+
+            if (prompt) {
+              worktrees.push({
+                promptId: prompt.id,
+                worktreePath: conversation.worktreePath,
+                prompt: prompt.prompt,
+                createdAt: prompt.createdAt,
+                branch: prompt.branch,
+              })
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing conversation ${file}:`, error)
+      }
+    }
+
+    return {
+      success: true,
+      worktrees: worktrees.sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+      ),
+    }
+  } catch (error: any) {
+    console.error('Error in get-project-worktrees IPC handler:', error)
+    return {
+      success: false,
+      error: error.message,
+      worktrees: [],
+    }
+  }
+})
+
+// Clean up orphaned conversation worktree references
+ipcMain.handle('cleanup-conversation-worktrees', async (event, projectPath) => {
+  try {
+    const { conversationsDir } = ensureProjectFolderStructure(projectPath)
+    const conversationFiles = readdirSync(conversationsDir).filter(file =>
+      file.endsWith('.json')
+    )
+
+    let cleanedCount = 0
+    const errors: string[] = []
+
+    for (const file of conversationFiles) {
+      try {
+        const filePath = join(conversationsDir, file)
+        const conversation = loadConversationHistory(
+          projectPath,
+          file.replace('.json', '')
+        )
+
+        if (conversation?.worktreePath) {
+          const isValid = await validateWorktreePath(conversation.worktreePath)
+
+          if (!isValid) {
+            console.log(`Cleaning up invalid worktree reference in ${file}`)
+            const updatedConversation = {
+              ...conversation,
+              worktreePath: undefined,
+              updatedAt: new Date(),
+            }
+
+            saveConversationHistory(updatedConversation)
+            cleanedCount++
+          }
+        }
+      } catch (error) {
+        const errorMsg = `Error processing ${file}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        console.error(errorMsg)
+        errors.push(errorMsg)
+      }
+    }
+
+    return {
+      success: true,
+      cleanedCount,
+      errors,
+    }
+  } catch (error: any) {
+    console.error('Error in cleanup-conversation-worktrees IPC handler:', error)
+    return {
+      success: false,
+      error: error.message,
+      cleanedCount: 0,
+      errors: [],
     }
   }
 })

@@ -275,7 +275,7 @@ export function Overview({
     []
   )
 
-  const handleMergeClick = async () => {
+  const handleMergeClick = async (deleteWorktree: boolean = false) => {
     if (!dropAction || !projectContext) return
 
     try {
@@ -295,6 +295,28 @@ export function Overview({
         })
 
         if (result.success) {
+          // If deleteWorktree is true, find and delete associated worktrees
+          if (deleteWorktree) {
+            try {
+              const worktreesResult = await App.getProjectWorktrees(projectContext.projectPath)
+              if (worktreesResult.success) {
+                // Find worktrees associated with the merged branch
+                const branchWorktrees = worktreesResult.worktrees.filter(
+                  (wt: any) => wt.branch === dropAction.draggedNode.id
+                )
+
+                // Delete each associated worktree
+                for (const worktree of branchWorktrees) {
+                  await App.cleanupWorktree(worktree.worktreePath)
+                  console.log(`Deleted worktree: ${worktree.worktreePath}`)
+                }
+              }
+            } catch (worktreeError) {
+              console.error('Error deleting worktrees:', worktreeError)
+              alert('Merge successful but failed to delete associated worktrees')
+            }
+          }
+
           // Remove the merged branch from visualization
           setNodes(prev =>
             prev.filter(node => node.id !== dropAction.draggedNode.id)
@@ -434,25 +456,33 @@ export function Overview({
         {/* Compact Merge Menu */}
         {dropAction && (
           <div
-            className="absolute bg-gray-700 border border-gray-600 rounded-lg shadow-lg p-2 z-50"
+            className="absolute bg-gray-700 border border-gray-600 rounded-lg shadow-lg p-3 z-50 min-w-[280px]"
             style={{
               left: dropAction.menuPosition.x,
               top: dropAction.menuPosition.y,
             }}
           >
-            <div className="text-sm text-gray-300 mb-2 text-center">
+            <div className="text-sm text-gray-300 mb-3 text-center">
               Merge "{dropAction.draggedNode.id}" → "{dropAction.targetNode.id}
               "?
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2">
               <button
-                className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors"
-                onClick={handleMergeClick}
+                className="px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors w-full text-left flex items-center gap-2"
+                onClick={() => handleMergeClick(true)}
               >
-                Merge
+                <span className="text-red-400">🗑️</span>
+                <span>Merge and Delete Worktree</span>
               </button>
               <button
-                className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors"
+                className="px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors w-full text-left flex items-center gap-2"
+                onClick={() => handleMergeClick(false)}
+              >
+                <span className="text-green-400">✓</span>
+                <span>Merge and Keep Worktree</span>
+              </button>
+              <button
+                className="px-3 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors w-full text-center"
                 onClick={handleCancelMerge}
               >
                 Cancel

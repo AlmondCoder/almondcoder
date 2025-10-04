@@ -91,6 +91,8 @@ const API = {
     ),
   getCurrentBranchStatus: (projectPath: string, branchName: string) =>
     ipcRenderer.invoke('get-current-branch-status', projectPath, branchName),
+  captureAiSessionId: (projectPath: string, aiTool: string) =>
+    ipcRenderer.invoke('capture-ai-session-id', projectPath, aiTool),
   // Worktree methods
   createWorktree: (
     projectPath: string,
@@ -107,6 +109,10 @@ const API = {
     ),
   cleanupWorktree: (worktreePath: string) =>
     ipcRenderer.invoke('cleanup-worktree', worktreePath),
+  validateWorktree: (worktreePath: string) =>
+    ipcRenderer.invoke('validate-worktree', worktreePath),
+  cleanupConversationWorktrees: (projectPath: string) =>
+    ipcRenderer.invoke('cleanup-conversation-worktrees', projectPath),
   // Legacy methods for backward compatibility
   getProjectPromptHistory: (projectPath: string) =>
     ipcRenderer.invoke('get-project-prompt-history', projectPath),

@@ -33,6 +33,8 @@ export interface ConversationHistory {
   promptId: string
   projectPath: string
   worktreePath?: string
+  parentWorktreePath?: string
+  aiSessionId?: string
   messages: ConversationMessage[]
   createdAt: Date
   updatedAt: Date
@@ -42,7 +44,6 @@ export interface EnhancedPromptHistoryItem {
   id: string
   prompt: string
   startExecutionTime: Date
-  endExecutionTime: Date | null
   branch: string
   branchStatus: BranchStatus
   promptHistoryId: string
@@ -59,6 +60,7 @@ export interface WorktreeInfo {
   projectName: string
   sanitizedPromptName: string
   shortUuid: string
+  branchName: string
 }
 
 export interface ProjectMetadata {
