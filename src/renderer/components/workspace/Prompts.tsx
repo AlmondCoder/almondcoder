@@ -31,14 +31,27 @@ export function Prompts({ projectContext }: PromptsProps) {
     Array<{
       id: string
       content: string
-      type: 'user' | 'system' | 'assistant'
+      type: 'user' | 'system' | 'assistant' | 'tool_call'
       timestamp: Date
       isStreaming?: boolean
+      toolName?: string
+      toolInput?: any
+      toolResult?: string
+      toolUseId?: string
     }>
   >([])
   const [isExecuting, setIsExecuting] = useState(false)
   const [_streamingMessageId, setStreamingMessageId] = useState<string | null>(
     null
+  )
+  const [currentAssistantMessageId, setCurrentAssistantMessageId] = useState<
+    string | null
+  >(null)
+  const [pendingToolCalls, setPendingToolCalls] = useState<Map<string, any>>(
+    new Map()
+  )
+  const [expandedToolInputs, setExpandedToolInputs] = useState<Set<string>>(
+    new Set()
   )
 
   const [claudeStatus, setClaudeStatus] = useState<{
@@ -116,6 +129,27 @@ export function Prompts({ projectContext }: PromptsProps) {
   const [currentWorktreePath, setCurrentWorktreePath] = useState<
     string | undefined
   >(undefined)
+
+  // Tool icon mapping
+  const getToolIcon = (toolName: string) => {
+    const iconMap: Record<string, string> = {
+      Read: '📖',
+      Write: '✍️',
+      Edit: '✏️',
+      Bash: '💻',
+      Glob: '🔍',
+      Grep: '🔎',
+      Task: '🤖',
+      WebFetch: '🌐',
+      WebSearch: '🔎',
+      TodoWrite: '📝',
+      NotebookEdit: '📓',
+      BashOutput: '📤',
+      KillShell: '🛑',
+      SlashCommand: '⚡',
+    }
+    return iconMap[toolName] || '🔧'
+  }
 
   // Check Claude installation on component mount
   useEffect(() => {
@@ -846,8 +880,12 @@ export function Prompts({ projectContext }: PromptsProps) {
     }
 
     try {
-      // Use worktree path if available, otherwise fall back to project path
-      const workingDirectory = currentWorktreePath || projectContext.projectPath
+      // Determine working directory:
+      // - If resuming a session, use the directory where session was created
+      // - Otherwise, use worktree path if available, else project path
+      const workingDirectory = currentConversation?.aiSessionId && currentConversation?.sessionWorkingDirectory
+        ? currentConversation.sessionWorkingDirectory
+        : (currentWorktreePath || projectContext.projectPath)
 
       // Generate command based on selected AI tool (without cd since we're setting working directory)
       let command: string
@@ -858,10 +896,16 @@ export function Prompts({ projectContext }: PromptsProps) {
 
         // Check if we have an existing session to resume
         const hasSession = currentConversation?.aiSessionId
+        console.log('Session check for Plan:', {
+          hasSession,
+          sessionId: currentConversation?.aiSessionId,
+          workingDirectory,
+          sessionWorkingDirectory: currentConversation?.sessionWorkingDirectory
+        })
         if (hasSession) {
-          command = `${claudeCmd} -r "${currentConversation.aiSessionId}" "${promptText}"`
+          command = `${claudeCmd} --output-format stream-json --verbose --print -r "${currentConversation.aiSessionId}" --allowedTools "Bash,Read,Write" --permission-mode acceptEdits "${promptText}"`
         } else {
-          command = `${claudeCmd} "${promptText}" --allowedTools "Bash,Read" --permission-mode acceptEdits`
+          command = `${claudeCmd} --output-format stream-json --verbose --print --allowedTools "Bash,Read,Write" --permission-mode acceptEdits "${promptText}"`
         }
       } else if (selectedAITool === 'codex') {
         command = `codex "${promptText}"`
@@ -880,40 +924,115 @@ export function Prompts({ projectContext }: PromptsProps) {
       const messageId = assistantMessage.id
       setChatMessages(prev => [...prev, assistantMessage])
       setStreamingMessageId(messageId)
+      setCurrentAssistantMessageId(messageId)
 
       try {
         const output = await window.App.executeCommandStream(
           command,
           data => {
-            if (data.type === 'stdout' || data.type === 'stderr') {
-              // Helper function to strip ANSI escape codes
-              const stripAnsi = (str: string): string => {
-                return str.replace(
-                  // eslint-disable-next-line no-control-regex
-                  /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-                  ''
-                )
-              }
+            if (data.type === 'stdout') {
+              try {
+                // Parse each line as JSON
+                const lines = data.data.split('\n').filter(line => line.trim())
 
-              // Check if this is meaningful content
-              const cleanData = stripAnsi(data.data).trim()
+                for (const line of lines) {
+                  try {
+                    const jsonData = JSON.parse(line)
 
-              // Only show messages that contain Claude's response indicator
-              const hasClaudeResponse = cleanData.includes('⏺')
+                    // Handle system init message to capture session_id
+                    if (jsonData.type === 'system' && jsonData.subtype === 'init') {
+                      if (jsonData.session_id && promptId && projectContext?.projectPath) {
+                        // Store session ID and working directory immediately
+                        const updatedConversation: ConversationHistory = {
+                          ...currentConversation!,
+                          aiSessionId: jsonData.session_id,
+                          sessionWorkingDirectory: workingDirectory,
+                          updatedAt: new Date(),
+                        }
+                        setCurrentConversation(updatedConversation)
+                        window.App.saveConversationHistory(updatedConversation).catch(console.error)
+                        console.log('Captured session ID:', jsonData.session_id, 'in directory:', workingDirectory)
+                      }
+                    }
+                    // Handle assistant messages
+                    else if (jsonData.type === 'assistant' && jsonData.message) {
+                      const content = jsonData.message.content
 
-              // Only process messages with Claude's response
-              if (hasClaudeResponse) {
-                const timestamp = new Date().toISOString()
-                console.log(`[${timestamp}] Important message:`, {
-                  type: data.type,
-                  cleanData: cleanData,
-                  dataLength: data.data.length,
-                  cleanLength: cleanData.length,
-                })
-                console.log(`[${timestamp}] Content:`, cleanData)
+                      if (Array.isArray(content)) {
+                        for (const item of content) {
+                          if (item.type === 'text' && item.text) {
+                            // Append text content to current assistant message
+                            setCurrentAssistantMessageId(currentId => {
+                              if (currentId) {
+                                updateStreamingMessage(currentId, item.text, false)
+                              }
+                              return currentId
+                            })
+                          } else if (item.type === 'tool_use') {
+                            // Finalize current streaming message before tool
+                            setCurrentAssistantMessageId(currentId => {
+                              if (currentId) {
+                                setChatMessages(prev =>
+                                  prev.map(msg =>
+                                    msg.id === currentId ? { ...msg, isStreaming: false } : msg
+                                  )
+                                )
+                              }
+                              return null
+                            })
 
-                // Send to viewer
-                updateStreamingMessage(messageId, data.data, true)
+                            // Create tool call message
+                            const toolCallMessage = {
+                              id: item.id,
+                              content: '',
+                              type: 'tool_call' as const,
+                              timestamp: new Date(),
+                              toolName: item.name,
+                              toolInput: item.input,
+                              toolUseId: item.id,
+                            }
+                            setChatMessages(prev => [...prev, toolCallMessage])
+
+                            // Start new assistant message for after tool
+                            const newAssistantId = Date.now().toString() + '-post-tool'
+                            const newAssistantMessage = {
+                              id: newAssistantId,
+                              content: '',
+                              type: 'assistant' as const,
+                              timestamp: new Date(),
+                              isStreaming: true,
+                            }
+                            setChatMessages(prev => [...prev, newAssistantMessage])
+                            setCurrentAssistantMessageId(newAssistantId)
+                          }
+                        }
+                      }
+                    }
+                    // Handle user messages (tool results)
+                    else if (jsonData.type === 'user' && jsonData.message) {
+                      const content = jsonData.message.content
+                      if (Array.isArray(content)) {
+                        for (const item of content) {
+                          if (item.type === 'tool_result') {
+                            // Update the corresponding tool call message with result
+                            setChatMessages(prev =>
+                              prev.map(msg =>
+                                msg.toolUseId === item.tool_use_id
+                                  ? { ...msg, toolResult: item.content }
+                                  : msg
+                              )
+                            )
+                          }
+                        }
+                      }
+                    }
+                  } catch (parseError) {
+                    // Skip lines that aren't valid JSON
+                    console.log('Failed to parse JSON line:', line)
+                  }
+                }
+              } catch (error) {
+                console.error('Error processing stream data:', error)
               }
             }
           },
@@ -927,34 +1046,6 @@ export function Prompts({ projectContext }: PromptsProps) {
           projectContext?.projectPath,
           promptId || undefined
         )
-
-        // Capture AI session ID if this was the first message (handlePlan)
-        if (
-          promptId &&
-          projectContext?.projectPath &&
-          !currentConversation?.aiSessionId &&
-          selectedAITool === 'claude-code'
-        ) {
-          try {
-            const result = await window.App.captureAiSessionId(
-              projectContext.projectPath,
-              selectedAITool
-            )
-            if (result.success && result.sessionId) {
-              console.log('Captured AI session ID:', result.sessionId)
-              // Update the conversation with the session ID
-              const updatedConversation: ConversationHistory = {
-                ...currentConversation!,
-                aiSessionId: result.sessionId,
-                updatedAt: new Date(),
-              }
-              setCurrentConversation(updatedConversation)
-              await window.App.saveConversationHistory(updatedConversation)
-            }
-          } catch (error) {
-            console.error('Error capturing AI session ID:', error)
-          }
-        }
 
         // Update prompt status to completed
         if (promptId) updatePromptStatus(promptId, 'completed')
@@ -971,9 +1062,11 @@ export function Prompts({ projectContext }: PromptsProps) {
           }
           return currentMessages
         })
-      } catch (streamError) {
+      } catch (streamError: any) {
         // Handle streaming errors
-        updateStreamingMessage(messageId, `\n\nError: ${streamError}`)
+        const errorMessage = streamError?.message || String(streamError)
+        updateStreamingMessage(messageId, `\n\nError: ${errorMessage}`)
+
         await finalizeStreamingMessage(
           messageId,
           projectContext?.projectPath,
@@ -1135,8 +1228,12 @@ export function Prompts({ projectContext }: PromptsProps) {
     }
 
     try {
-      // Use worktree path if available, otherwise fall back to project path
-      const workingDirectory = currentWorktreePath || projectContext.projectPath
+      // Determine working directory:
+      // - If resuming a session, use the directory where session was created
+      // - Otherwise, use worktree path if available, else project path
+      const workingDirectory = currentConversation?.aiSessionId && currentConversation?.sessionWorkingDirectory
+        ? currentConversation.sessionWorkingDirectory
+        : (currentWorktreePath || projectContext.projectPath)
 
       // If using worktree, we're already on the correct branch and in an isolated workspace
       if (currentWorktreePath) {
@@ -1172,11 +1269,16 @@ export function Prompts({ projectContext }: PromptsProps) {
 
         // Check if we have an existing session to resume
         const hasSession = currentConversation?.aiSessionId
-        console.log(currentConversation)
+        console.log('Session check for Execute:', {
+          hasSession,
+          sessionId: currentConversation?.aiSessionId,
+          workingDirectory,
+          sessionWorkingDirectory: currentConversation?.sessionWorkingDirectory
+        })
         if (hasSession) {
-          command = `${claudeCmd} -r "${currentConversation.aiSessionId}" "${promptText}" --allowedTools "Bash,Read" --permission-mode acceptEdits`
+          command = `${claudeCmd} --output-format stream-json --verbose --print -r "${currentConversation.aiSessionId}" --allowedTools "Bash,Read,Write" --permission-mode acceptEdits "${promptText}"`
         } else {
-          command = `${claudeCmd} "${promptText}" --allowedTools "Bash,Read" --permission-mode acceptEdits`
+          command = `${claudeCmd} --output-format stream-json --verbose --print --allowedTools "Bash,Read,Write" --permission-mode acceptEdits "${promptText}"`
         }
       } else if (selectedAITool === 'codex') {
         command = `codex "${promptText}"`
@@ -1196,41 +1298,115 @@ export function Prompts({ projectContext }: PromptsProps) {
       const messageId = assistantMessage.id
       setChatMessages(prev => [...prev, assistantMessage])
       setStreamingMessageId(messageId)
+      setCurrentAssistantMessageId(messageId)
 
       try {
         const output = await window.App.executeCommandStream(
           command,
           data => {
-            // Update the streaming message with new data
-            if (data.type === 'stdout' || data.type === 'stderr') {
-              // Helper function to strip ANSI escape codes
-              const stripAnsi = (str: string): string => {
-                return str.replace(
-                  // eslint-disable-next-line no-control-regex
-                  /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-                  ''
-                )
-              }
+            if (data.type === 'stdout') {
+              try {
+                // Parse each line as JSON
+                const lines = data.data.split('\n').filter(line => line.trim())
 
-              // Check if this is meaningful content
-              const cleanData = stripAnsi(data.data).trim()
+                for (const line of lines) {
+                  try {
+                    const jsonData = JSON.parse(line)
 
-              // Only show messages that contain Claude's response indicator
-              const hasClaudeResponse = cleanData.includes('⏺')
+                    // Handle system init message to capture session_id
+                    if (jsonData.type === 'system' && jsonData.subtype === 'init') {
+                      if (jsonData.session_id && promptId && projectContext?.projectPath) {
+                        // Store session ID and working directory immediately
+                        const updatedConversation: ConversationHistory = {
+                          ...currentConversation!,
+                          aiSessionId: jsonData.session_id,
+                          sessionWorkingDirectory: workingDirectory,
+                          updatedAt: new Date(),
+                        }
+                        setCurrentConversation(updatedConversation)
+                        window.App.saveConversationHistory(updatedConversation).catch(console.error)
+                        console.log('Captured session ID:', jsonData.session_id, 'in directory:', workingDirectory)
+                      }
+                    }
+                    // Handle assistant messages
+                    else if (jsonData.type === 'assistant' && jsonData.message) {
+                      const content = jsonData.message.content
 
-              // Only process messages with Claude's response
-              if (hasClaudeResponse) {
-                const timestamp = new Date().toISOString()
-                console.log(`[${timestamp}] Important message:`, {
-                  type: data.type,
-                  cleanData: cleanData,
-                  dataLength: data.data.length,
-                  cleanLength: cleanData.length,
-                })
-                console.log(`[${timestamp}] Content:`, cleanData)
+                      if (Array.isArray(content)) {
+                        for (const item of content) {
+                          if (item.type === 'text' && item.text) {
+                            // Append text content to current assistant message
+                            setCurrentAssistantMessageId(currentId => {
+                              if (currentId) {
+                                updateStreamingMessage(currentId, item.text, false)
+                              }
+                              return currentId
+                            })
+                          } else if (item.type === 'tool_use') {
+                            // Finalize current streaming message before tool
+                            setCurrentAssistantMessageId(currentId => {
+                              if (currentId) {
+                                setChatMessages(prev =>
+                                  prev.map(msg =>
+                                    msg.id === currentId ? { ...msg, isStreaming: false } : msg
+                                  )
+                                )
+                              }
+                              return null
+                            })
 
-                // Send to viewer
-                updateStreamingMessage(messageId, data.data, true)
+                            // Create tool call message
+                            const toolCallMessage = {
+                              id: item.id,
+                              content: '',
+                              type: 'tool_call' as const,
+                              timestamp: new Date(),
+                              toolName: item.name,
+                              toolInput: item.input,
+                              toolUseId: item.id,
+                            }
+                            setChatMessages(prev => [...prev, toolCallMessage])
+
+                            // Start new assistant message for after tool
+                            const newAssistantId = Date.now().toString() + '-post-tool'
+                            const newAssistantMessage = {
+                              id: newAssistantId,
+                              content: '',
+                              type: 'assistant' as const,
+                              timestamp: new Date(),
+                              isStreaming: true,
+                            }
+                            setChatMessages(prev => [...prev, newAssistantMessage])
+                            setCurrentAssistantMessageId(newAssistantId)
+                          }
+                        }
+                      }
+                    }
+                    // Handle user messages (tool results)
+                    else if (jsonData.type === 'user' && jsonData.message) {
+                      const content = jsonData.message.content
+                      if (Array.isArray(content)) {
+                        for (const item of content) {
+                          if (item.type === 'tool_result') {
+                            // Update the corresponding tool call message with result
+                            setChatMessages(prev =>
+                              prev.map(msg =>
+                                msg.toolUseId === item.tool_use_id
+                                  ? { ...msg, toolResult: item.content }
+                                  : msg
+                              )
+                            )
+                          }
+                        }
+                      }
+                    }
+                  } catch (parseError) {
+                    // Skip lines that aren't valid JSON
+                    console.log('Failed to parse JSON line:', line)
+                  }
+                }
+              } catch (error) {
+                console.error('Error processing stream data:', error)
               }
             }
           },
@@ -1245,34 +1421,6 @@ export function Prompts({ projectContext }: PromptsProps) {
           projectContext?.projectPath,
           promptId || undefined
         )
-
-        // Capture AI session ID if this was the first message (handleExecute)
-        if (
-          promptId &&
-          projectContext?.projectPath &&
-          !currentConversation?.aiSessionId &&
-          selectedAITool === 'claude-code'
-        ) {
-          try {
-            const result = await window.App.captureAiSessionId(
-              projectContext.projectPath,
-              selectedAITool
-            )
-            if (result.success && result.sessionId) {
-              console.log('Captured AI session ID:', result.sessionId)
-              // Update the conversation with the session ID
-              const updatedConversation: ConversationHistory = {
-                ...currentConversation!,
-                aiSessionId: result.sessionId,
-                updatedAt: new Date(),
-              }
-              setCurrentConversation(updatedConversation)
-              await window.App.saveConversationHistory(updatedConversation)
-            }
-          } catch (error) {
-            console.error('Error capturing AI session ID:', error)
-          }
-        }
 
         // Update prompt status to completed
         if (promptId) updatePromptStatus(promptId, 'completed')
@@ -1292,16 +1440,18 @@ export function Prompts({ projectContext }: PromptsProps) {
           }
           return currentMessages
         })
-      } catch (error) {
+      } catch (streamError: any) {
         // Handle streaming errors
-        updateStreamingMessage(messageId, `\n\nError: ${error}`)
+        const errorMessage = streamError?.message || String(streamError)
+        updateStreamingMessage(messageId, `\n\nError: ${errorMessage}`)
+
         await finalizeStreamingMessage(
           messageId,
           projectContext?.projectPath,
           promptId || undefined
         )
         if (promptId) updatePromptStatus(promptId, 'old')
-        throw error
+        throw streamError
       }
     } catch (error: any) {
       console.error('Error during execution:', error)
@@ -1425,7 +1575,7 @@ export function Prompts({ projectContext }: PromptsProps) {
       </div>
 
       {/* Second Section - Input Area (45% width) */}
-      <div className="w-4/5 p-6 flex flex-col">
+      <div className="w-4/5 p-6 flex flex-col overflow-y-auto" ref={chatContainerRef}>
         <h3
           className={`text-lg font-semibold mb-4 ${themeClasses.textPrimary}`}
         >
@@ -1542,47 +1692,138 @@ export function Prompts({ projectContext }: PromptsProps) {
           {/* Chat Messages Area */}
           {chatMessages.length > 0 && (
             <div
-              className={`flex-1 ${themeClasses.bgSecondary} rounded-lg p-4 mb-4 overflow-y-auto border ${themeClasses.borderPrimary} space-y-3`}
-              ref={chatContainerRef}
+              className={`flex-1 ${themeClasses.bgSecondary} rounded-lg p-4 mb-4 border ${themeClasses.borderPrimary} space-y-3`}
             >
-              {chatMessages.map(message => (
+              {chatMessages.filter(msg => {
+                // Filter out empty assistant messages that were created during tool call transitions
+                if (msg.type === 'assistant' && !msg.content.trim() && !msg.isStreaming) {
+                  return false
+                }
+                return true
+              }).map(message => (
                 <div
                   className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
                   key={message.id}
                 >
-                  <div
-                    className={`max-w-[85%] p-3 rounded-lg ${
-                      message.type === 'user'
-                        ? `${themeClasses.chatUser} ml-12`
-                        : message.type === 'assistant'
-                          ? `${themeClasses.chatAssistant} mr-12`
-                          : `${themeClasses.chatSystem} mr-12`
-                    }`}
-                  >
-                    {message.type === 'system' && (
-                      <div className="text-xs font-medium text-yellow-300 mb-1">
-                        System
+                  {message.type === 'tool_call' ? (
+                    // Tool call block
+                    <div className={`max-w-[85%] mr-12 ${themeClasses.bgTertiary} border ${themeClasses.borderPrimary} rounded-lg p-4`}>
+                      <div className="flex items-start gap-3">
+                        <div className="text-2xl flex-shrink-0 mt-1">
+                          {getToolIcon(message.toolName || '')}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`text-sm font-semibold ${themeClasses.textPrimary}`}>
+                              {message.toolName}
+                            </div>
+                            {message.toolInput?.file_path && (
+                              <div className={`text-xs ${themeClasses.textTertiary} truncate`}>
+                                {message.toolInput.file_path}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Tool Input */}
+                          {message.toolInput && (
+                            <div className={`mb-3 ${themeClasses.bgSecondary} rounded p-2`}>
+                              <div className={`text-xs font-medium ${themeClasses.textSecondary} mb-1`}>
+                                Input:
+                              </div>
+                              <div className={`text-xs ${themeClasses.textPrimary}`}>
+                                {(() => {
+                                  const inputStr = JSON.stringify(message.toolInput, null, 2)
+                                  const isLong = inputStr.length > 200
+                                  const isExpanded = expandedToolInputs.has(message.id)
+
+                                  return (
+                                    <div>
+                                      <pre className="whitespace-pre-wrap break-words font-mono">
+                                        {isLong && !isExpanded
+                                          ? inputStr.substring(0, 200) + '...'
+                                          : inputStr}
+                                      </pre>
+                                      {isLong && (
+                                        <button
+                                          className="text-blue-400 hover:text-blue-300 mt-1 underline"
+                                          onClick={() => {
+                                            setExpandedToolInputs(prev => {
+                                              const newSet = new Set(prev)
+                                              if (isExpanded) {
+                                                newSet.delete(message.id)
+                                              } else {
+                                                newSet.add(message.id)
+                                              }
+                                              return newSet
+                                            })
+                                          }}
+                                        >
+                                          {isExpanded ? 'Show less' : 'See more'}
+                                        </button>
+                                      )}
+                                    </div>
+                                  )
+                                })()}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tool Result */}
+                          {message.toolResult && (
+                            <div className={`${themeClasses.bgSecondary} rounded p-2`}>
+                              <div className={`text-xs font-medium ${themeClasses.textSecondary} mb-1`}>
+                                Result:
+                              </div>
+                              <div className={`text-xs ${themeClasses.textPrimary}`}>
+                                <pre className="whitespace-pre-wrap break-words font-mono">
+                                  {message.toolResult}
+                                </pre>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="text-xs opacity-70 mt-2">
+                            {message.timestamp.toLocaleTimeString()}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    {message.type === 'assistant' && (
-                      <div className="text-xs font-medium text-blue-300 mb-2">
-                        Claude
-                      </div>
-                    )}
-                    {message.type === 'assistant' ? (
-                      <StreamViewer
-                        content={message.content}
-                        isStreaming={message.isStreaming}
-                      />
-                    ) : (
-                      <div className="text-sm whitespace-pre-wrap">
-                        {message.content}
-                      </div>
-                    )}
-                    <div className="text-xs opacity-70 mt-1">
-                      {message.timestamp.toLocaleTimeString()}
                     </div>
-                  </div>
+                  ) : (
+                    // Regular message block
+                    <div
+                      className={`max-w-[85%] p-3 rounded-lg ${
+                        message.type === 'user'
+                          ? `${themeClasses.chatUser} ml-12`
+                          : message.type === 'assistant'
+                            ? `${themeClasses.chatAssistant} mr-12`
+                            : `${themeClasses.chatSystem} mr-12`
+                      }`}
+                    >
+                      {message.type === 'system' && (
+                        <div className="text-xs font-medium text-yellow-300 mb-1">
+                          System
+                        </div>
+                      )}
+                      {message.type === 'assistant' && (
+                        <div className="text-xs font-medium text-blue-300 mb-2">
+                          Claude
+                        </div>
+                      )}
+                      {message.type === 'assistant' ? (
+                        <StreamViewer
+                          content={message.content}
+                          isStreaming={message.isStreaming}
+                        />
+                      ) : (
+                        <div className="text-sm whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                      )}
+                      <div className="text-xs opacity-70 mt-1">
+                        {message.timestamp.toLocaleTimeString()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               {isExecuting && (

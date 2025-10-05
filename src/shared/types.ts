@@ -24,9 +24,13 @@ export type BranchStatus = 'active' | 'deleted'
 export interface ConversationMessage {
   id: string
   content: string
-  type: 'user' | 'system' | 'assistant'
+  type: 'user' | 'system' | 'assistant' | 'tool_call'
   timestamp: Date
   isStreaming?: boolean
+  toolName?: string
+  toolInput?: any
+  toolResult?: string
+  toolUseId?: string
 }
 
 export interface ConversationHistory {
@@ -35,6 +39,7 @@ export interface ConversationHistory {
   worktreePath?: string
   parentWorktreePath?: string
   aiSessionId?: string
+  sessionWorkingDirectory?: string
   messages: ConversationMessage[]
   createdAt: Date
   updatedAt: Date

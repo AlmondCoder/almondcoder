@@ -209,13 +209,28 @@ const validateConversationData = (data: any): data is ConversationHistory => {
   if (data.parentWorktreePath !== undefined && typeof data.parentWorktreePath !== 'string')
     return false
 
+  // aiSessionId is optional but if present, should be a string
+  if (data.aiSessionId !== undefined && typeof data.aiSessionId !== 'string')
+    return false
+
+  // sessionWorkingDirectory is optional but if present, should be a string
+  if (data.sessionWorkingDirectory !== undefined && typeof data.sessionWorkingDirectory !== 'string')
+    return false
+
   // Validate each message
   for (const msg of data.messages) {
     if (!msg || typeof msg !== 'object') return false
     if (typeof msg.id !== 'string') return false
     if (typeof msg.content !== 'string') return false
-    if (!['user', 'system', 'assistant'].includes(msg.type)) return false
+    if (!['user', 'system', 'assistant', 'tool_call'].includes(msg.type)) return false
     if (!msg.timestamp) return false
+
+    // For tool_call messages, validate optional tool-related fields
+    if (msg.type === 'tool_call') {
+      if (msg.toolName !== undefined && typeof msg.toolName !== 'string') return false
+      if (msg.toolUseId !== undefined && typeof msg.toolUseId !== 'string') return false
+      if (msg.toolResult !== undefined && typeof msg.toolResult !== 'string') return false
+    }
   }
 
   return true
