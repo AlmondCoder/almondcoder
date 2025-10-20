@@ -1,13 +1,13 @@
 {
-  "displayName": "My Electron App",
-  "name": "my-electron-app",
-  "description": "Your awesome app description",
+  "displayName": "AlmondCoder",
+  "name": "almondcoder",
+  "description": "AI-powered coding assistant with Git integration",
   "version": "0.0.0",
   "main": "./node_modules/.dev/main/index.js",
   "resources": "src/resources",
   "author": {
-    "name": "Dalton Menezes",
-    "email": "daltonmenezes@outlook.com"
+    "name": "AlmondCoder Team",
+    "email": "team@almondcoder.com"
   },
   "license": "MIT",
   "packageManager": "pnpm@10.0.0",
@@ -15,9 +15,10 @@
     "onlyBuiltDependenciesFile": "./trusted-dependencies-scripts.json"
   },
   "scripts": {
-    "start": "electron-vite preview",
+    "start": "pnpm run dev",
     "predev": "run-s clean:dev",
     "dev": "cross-env NODE_ENV=development electron-vite dev --watch",
+    "preview": "pnpm run prebuild && cross-env NODE_ENV=production electron ./node_modules/.dev/main/index.js",
     "compile:app": "electron-vite build",
     "compile:packageJSON": "tsx ./src/lib/electron-app/release/modules/prebuild.ts",
     "prebuild": "run-s clean:dev compile:app compile:packageJSON",
@@ -32,6 +33,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-router-dom": "^2.1.0",
@@ -39,8 +41,11 @@
     "node-pty": "^1.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.8.2",
+    "react-syntax-highlighter": "^15.6.6",
     "reactflow": "^11.11.4",
+    "remark-gfm": "^4.0.1",
     "strip-ansi": "^6.0.1",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7"

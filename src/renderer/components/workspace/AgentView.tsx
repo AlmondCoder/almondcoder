@@ -25,12 +25,14 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
             // Edit Mode
             <div className="space-y-4">
               <div>
-                <label className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
                   Agent Name
                 </label>
                 <input
                   className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus}`}
-                  onChange={(e) => {
+                  onChange={e => {
                     if (editingAgent) {
                       setEditingAgent({ ...editingAgent, name: e.target.value })
                     }
@@ -42,14 +44,19 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
               </div>
 
               <div>
-                <label className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
                   System Prompt
                 </label>
                 <textarea
                   className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus} min-h-[120px]`}
-                  onChange={(e) => {
+                  onChange={e => {
                     if (editingAgent) {
-                      setEditingAgent({ ...editingAgent, systemPrompt: e.target.value })
+                      setEditingAgent({
+                        ...editingAgent,
+                        systemPrompt: e.target.value,
+                      })
                     }
                   }}
                   placeholder="System prompt for this agent"
@@ -58,11 +65,24 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
               </div>
 
               <div>
-                <label className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
                   Available Tools
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Task', 'WebFetch', 'WebSearch', 'TodoWrite'].map(tool => (
+                  {[
+                    'Read',
+                    'Write',
+                    'Edit',
+                    'Bash',
+                    'Glob',
+                    'Grep',
+                    'Task',
+                    'WebFetch',
+                    'WebSearch',
+                    'TodoWrite',
+                  ].map(tool => (
                     <button
                       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                         editingAgent?.tools.includes(tool)
@@ -99,11 +119,13 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
                   className={`px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors`}
                   onClick={() => {
                     if (editingAgent) {
-                      setAgents(agents.map(a =>
-                        a.id === editingAgent.id
-                          ? { ...editingAgent, updatedAt: new Date() }
-                          : a
-                      ))
+                      setAgents(
+                        agents.map(a =>
+                          a.id === editingAgent.id
+                            ? { ...editingAgent, updatedAt: new Date() }
+                            : a
+                        )
+                      )
                       setEditingAgentId(null)
                       setEditingAgent(null)
                     }
@@ -118,7 +140,9 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
             <div className="space-y-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <h4 className={`text-xl font-bold ${themeClasses.textPrimary} mb-1`}>
+                  <h4
+                    className={`text-xl font-bold ${themeClasses.textPrimary} mb-1`}
+                  >
                     {agent.name}
                   </h4>
                   <p className={`text-xs ${themeClasses.textTertiary}`}>
@@ -137,10 +161,14 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
               </div>
 
               <div>
-                <label className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
                   System Prompt
                 </label>
-                <div className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3`}>
+                <div
+                  className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3`}
+                >
                   <p className={`text-sm ${themeClasses.textPrimary}`}>
                     {agent.systemPrompt}
                   </p>
@@ -148,7 +176,9 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
               </div>
 
               <div>
-                <label className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
                   Available Tools
                 </label>
                 <div className="flex flex-wrap gap-2">

@@ -1,4 +1,12 @@
-import { app, dialog, ipcMain } from 'electron'
+import {
+  app,
+  dialog,
+  ipcMain,
+  Tray,
+  Menu,
+  nativeImage,
+  BrowserWindow,
+} from 'electron'
 import { join, basename } from 'node:path'
 import {
   existsSync,
@@ -24,6 +32,7 @@ import type {
   ConversationHistory,
   ConversationMessage,
   ProjectMetadata,
+  ProjectSettings,
   BranchStatus,
   WorktreeInfo,
 } from '../shared/types'
@@ -207,7 +216,10 @@ const validateConversationData = (data: any): data is ConversationHistory => {
     return false
 
   // parentWorktreePath is optional but if present, should be a string
-  if (data.parentWorktreePath !== undefined && typeof data.parentWorktreePath !== 'string')
+  if (
+    data.parentWorktreePath !== undefined &&
+    typeof data.parentWorktreePath !== 'string'
+  )
     return false
 
   // aiSessionId is optional but if present, should be a string
@@ -215,7 +227,10 @@ const validateConversationData = (data: any): data is ConversationHistory => {
     return false
 
   // sessionWorkingDirectory is optional but if present, should be a string
-  if (data.sessionWorkingDirectory !== undefined && typeof data.sessionWorkingDirectory !== 'string')
+  if (
+    data.sessionWorkingDirectory !== undefined &&
+    typeof data.sessionWorkingDirectory !== 'string'
+  )
     return false
 
   // Validate each message
@@ -223,14 +238,18 @@ const validateConversationData = (data: any): data is ConversationHistory => {
     if (!msg || typeof msg !== 'object') return false
     if (typeof msg.id !== 'string') return false
     if (typeof msg.content !== 'string') return false
-    if (!['user', 'system', 'assistant', 'tool_call'].includes(msg.type)) return false
+    if (!['user', 'system', 'assistant', 'tool_call'].includes(msg.type))
+      return false
     if (!msg.timestamp) return false
 
     // For tool_call messages, validate optional tool-related fields
     if (msg.type === 'tool_call') {
-      if (msg.toolName !== undefined && typeof msg.toolName !== 'string') return false
-      if (msg.toolUseId !== undefined && typeof msg.toolUseId !== 'string') return false
-      if (msg.toolResult !== undefined && typeof msg.toolResult !== 'string') return false
+      if (msg.toolName !== undefined && typeof msg.toolName !== 'string')
+        return false
+      if (msg.toolUseId !== undefined && typeof msg.toolUseId !== 'string')
+        return false
+      if (msg.toolResult !== undefined && typeof msg.toolResult !== 'string')
+        return false
     }
   }
 
@@ -352,7 +371,6 @@ const getCurrentBranchStatus = async (
     return 'active'
   }
 }
-
 
 // Worktree utility functions
 const generateShortUuid = (): string => {
@@ -500,18 +518,28 @@ const createWorktree = async (
       console.log(`Parent worktree is at commit: ${commitHash}`)
 
       // Create new worktree with a new branch based on the parent's commit
-      await execAsync(`git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${commitHash}"`, {
-        cwd: projectPath,
-      })
+      await execAsync(
+        `git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${commitHash}"`,
+        {
+          cwd: projectPath,
+        }
+      )
 
-      console.log(`✅ Created worktree: ${worktreePath} with branch ${uniqueBranchName} from parent worktree commit: ${commitHash}`)
+      console.log(
+        `✅ Created worktree: ${worktreePath} with branch ${uniqueBranchName} from parent worktree commit: ${commitHash}`
+      )
     } else {
       // Create new branch from the validated branch and create worktree on it
-      await execAsync(`git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${validBranch}"`, {
-        cwd: projectPath,
-      })
+      await execAsync(
+        `git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${validBranch}"`,
+        {
+          cwd: projectPath,
+        }
+      )
 
-      console.log(`✅ Created worktree: ${worktreePath} with branch ${uniqueBranchName} from branch: ${validBranch}`)
+      console.log(
+        `✅ Created worktree: ${worktreePath} with branch ${uniqueBranchName} from branch: ${validBranch}`
+      )
     }
 
     return {
@@ -578,6 +606,72 @@ ipcMain.handle('add-recent-project', (event, project) => {
   return limitedProjects
 })
 
+// Project Memory IPC handlers - Reads/writes CLAUDE.md in project root
+ipcMain.handle('read-project-memory', async (event, projectPath: string) => {
+  try {
+    const claudeMdPath = join(projectPath, 'CLAUDE.md')
+
+    if (existsSync(claudeMdPath)) {
+      return readFileSync(claudeMdPath, 'utf-8')
+    }
+    return ''
+  } catch (error) {
+    console.error('Error reading CLAUDE.md:', error)
+    throw error
+  }
+})
+
+ipcMain.handle('save-project-memory', async (event, projectPath: string, content: string) => {
+  try {
+    const claudeMdPath = join(projectPath, 'CLAUDE.md')
+    writeFileSync(claudeMdPath, content, 'utf-8')
+    return true
+  } catch (error) {
+    console.error('Error saving CLAUDE.md:', error)
+    throw error
+  }
+})
+
+// Settings IPC handlers - General settings management
+ipcMain.handle('get-project-settings', async (event, projectPath: string) => {
+  try {
+    const metadata = loadProjectMetadata(projectPath)
+    return metadata?.settings || {}
+  } catch (error) {
+    console.error('Error getting project settings:', error)
+    throw error
+  }
+})
+
+ipcMain.handle('save-project-settings', async (event, projectPath: string, settings: ProjectSettings) => {
+  try {
+    let metadata = loadProjectMetadata(projectPath)
+
+    if (!metadata) {
+      // Create metadata if it doesn't exist
+      const projectName = basename(projectPath)
+      metadata = {
+        projectName,
+        projectPath,
+        createdAt: new Date(),
+        lastUsed: new Date(),
+        totalPrompts: 0,
+        settings,
+      }
+    } else {
+      // Update existing metadata with new settings
+      metadata.settings = settings
+      metadata.lastUsed = new Date()
+    }
+
+    saveProjectMetadata(projectPath, metadata)
+    return true
+  } catch (error) {
+    console.error('Error saving project settings:', error)
+    throw error
+  }
+})
+
 // Enhanced Prompt history IPC handlers
 ipcMain.handle('get-enhanced-prompt-history', (event, projectPath) => {
   ensureProjectFolderStructure(projectPath)
@@ -630,7 +724,10 @@ ipcMain.handle('read-conversation-log', async (event, filePath: string) => {
       return []
     }
 
-    console.log(`✅ Read ${logEntries.length} entries from conversation log:`, expandedFilePath)
+    console.log(
+      `✅ Read ${logEntries.length} entries from conversation log:`,
+      expandedFilePath
+    )
     return logEntries
   } catch (error) {
     console.error('❌ Error reading conversation log:', error)
@@ -667,7 +764,10 @@ ipcMain.handle(
             logEntries = []
           }
         } catch (parseError) {
-          console.error('Error parsing conversation log file, recreating:', parseError)
+          console.error(
+            'Error parsing conversation log file, recreating:',
+            parseError
+          )
           logEntries = []
         }
       } else {
@@ -679,14 +779,17 @@ ipcMain.handle(
 
       // Write back to file
       writeFileSync(expandedFilePath, JSON.stringify(logEntries, null, 2))
-      console.log('✅ Successfully wrote to conversation log:', expandedFilePath)
+      console.log(
+        '✅ Successfully wrote to conversation log:',
+        expandedFilePath
+      )
 
       return { success: true }
     } catch (error: any) {
       console.error('Error appending to conversation log:', error)
       return {
         success: false,
-        error: error.message
+        error: error.message,
       }
     }
   }
@@ -726,6 +829,136 @@ ipcMain.handle('get-git-branches', async (event, path) => {
   } catch (error) {
     console.error('Error getting git branches:', error)
     return ['main']
+  }
+})
+
+ipcMain.handle('get-git-diff', async (event, path) => {
+  try {
+    // Get the diff between HEAD and working directory
+    const { stdout } = await execAsync('git diff HEAD', { cwd: path })
+
+    if (!stdout.trim()) {
+      // No changes
+      return { diffs: [], error: null }
+    }
+
+    // Parse the diff output
+    const diffs: any[] = []
+    const diffLines = stdout.split('\n')
+
+    let currentFile: any = null
+    let currentHunk: any = null
+    let oldLineNumber = 0
+    let newLineNumber = 0
+
+    for (let i = 0; i < diffLines.length; i++) {
+      const line = diffLines[i]
+
+      // New file header (diff --git)
+      if (line.startsWith('diff --git')) {
+        if (currentFile) {
+          diffs.push(currentFile)
+        }
+
+        // Extract file path from "diff --git a/path b/path"
+        const match = line.match(/diff --git a\/(.*?) b\/(.*)/)
+        const filePath = match ? match[2] : 'unknown'
+
+        currentFile = {
+          filePath,
+          status: 'modified',
+          additions: 0,
+          deletions: 0,
+          hunks: [],
+        }
+        currentHunk = null
+      }
+
+      // File status indicators
+      if (line.startsWith('new file mode')) {
+        if (currentFile) currentFile.status = 'added'
+      } else if (line.startsWith('deleted file mode')) {
+        if (currentFile) currentFile.status = 'deleted'
+      }
+
+      // Hunk header (@@ -oldStart,oldLines +newStart,newLines @@)
+      if (line.startsWith('@@')) {
+        if (currentHunk) {
+          currentFile?.hunks.push(currentHunk)
+        }
+
+        const match = line.match(
+          /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/
+        )
+        if (match) {
+          oldLineNumber = parseInt(match[1], 10)
+          const oldLines = match[2] ? parseInt(match[2], 10) : 1
+          newLineNumber = parseInt(match[3], 10)
+          const newLines = match[4] ? parseInt(match[4], 10) : 1
+
+          currentHunk = {
+            oldStart: oldLineNumber,
+            oldLines,
+            newStart: newLineNumber,
+            newLines,
+            lines: [
+              {
+                type: 'header',
+                content: line,
+              },
+            ],
+          }
+        }
+      } else if (
+        currentHunk &&
+        !line.startsWith('diff --git') &&
+        !line.startsWith('index ') &&
+        !line.startsWith('---') &&
+        !line.startsWith('+++') &&
+        !line.startsWith('new file') &&
+        !line.startsWith('deleted file')
+      ) {
+        // Diff content lines
+        if (line.startsWith('+')) {
+          currentHunk.lines.push({
+            type: 'added',
+            content: line.substring(1),
+            newLineNumber: newLineNumber++,
+          })
+          if (currentFile) currentFile.additions++
+        } else if (line.startsWith('-')) {
+          currentHunk.lines.push({
+            type: 'deleted',
+            content: line.substring(1),
+            oldLineNumber: oldLineNumber++,
+          })
+          if (currentFile) currentFile.deletions++
+        } else if (line.startsWith(' ')) {
+          currentHunk.lines.push({
+            type: 'context',
+            content: line.substring(1),
+            oldLineNumber: oldLineNumber++,
+            newLineNumber: newLineNumber++,
+          })
+        }
+      }
+    }
+
+    // Push the last file and hunk
+    if (currentHunk) {
+      currentFile?.hunks.push(currentHunk)
+    }
+    if (currentFile) {
+      diffs.push(currentFile)
+    }
+
+    return { diffs, error: null }
+  } catch (error) {
+    console.error('Error getting git diff:', error)
+    return {
+      diffs: [],
+      error: error instanceof Error ? error.message : 'Failed to get git diff',
+    }
   }
 })
 
@@ -1019,7 +1252,9 @@ ipcMain.handle(
         } catch (checkoutError: any) {
           // If checkout fails due to worktree conflict, use a workaround
           if (checkoutError.message.includes('already used by worktree')) {
-            console.log('Target branch is in a worktree, using merge without checkout')
+            console.log(
+              'Target branch is in a worktree, using merge without checkout'
+            )
 
             // Get the commit hash of the source branch
             const { stdout: sourceCommit } = await execAsync(
@@ -1039,7 +1274,9 @@ ipcMain.handle(
               { cwd: path }
             )
 
-            console.log(`Merged ${sourceBranch} into ${targetBranch} without checkout`)
+            console.log(
+              `Merged ${sourceBranch} into ${targetBranch} without checkout`
+            )
             return { success: true }
           }
           throw checkoutError
@@ -1077,8 +1314,6 @@ ipcMain.handle(
     }
   }
 )
-
-
 
 // Keep the original execute-command for compatibility
 ipcMain.handle(
@@ -1118,7 +1353,14 @@ ipcMain.handle(
 // Worktree IPC handlers
 ipcMain.handle(
   'create-worktree',
-  async (event, projectPath, branch, promptText, promptId, parentWorktreePath) => {
+  async (
+    event,
+    projectPath,
+    branch,
+    promptText,
+    promptId,
+    parentWorktreePath
+  ) => {
     try {
       const worktreeInfo = await createWorktree(
         projectPath,
@@ -1268,8 +1510,14 @@ ipcMain.handle('cleanup-conversation-worktrees', async (event, projectPath) => {
             }
 
             // Write the updated conversation directly
-            const filePath = getConversationFilePath(projectPath, conversation.promptId)
-            writeFileSync(filePath, JSON.stringify(updatedConversation, null, 2))
+            const filePath = getConversationFilePath(
+              projectPath,
+              conversation.promptId
+            )
+            writeFileSync(
+              filePath,
+              JSON.stringify(updatedConversation, null, 2)
+            )
             cleanedCount++
           }
         }
@@ -1303,17 +1551,20 @@ ipcMain.handle('cleanup-conversation-worktrees', async (event, projectPath) => {
 // queries. We've extended it to include permission system parameters.
 ipcMain.handle(
   'execute-claude-sdk',
-  async (event, options: {
-    prompt: string
-    workingDirectory: string
-    allowedTools?: string[]
-    permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
-    resume?: string
-    // New fields for permission system:
-    promptId?: string            // Which conversation is making this request
-    conversationTitle?: string   // Display name for the conversation
-    autoAcceptEnabled?: boolean  // Whether auto-accept toggle is ON
-  }) => {
+  async (
+    event,
+    options: {
+      prompt: string
+      workingDirectory: string
+      allowedTools?: string[]
+      permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+      resume?: string
+      // New fields for permission system:
+      promptId?: string // Which conversation is making this request
+      conversationTitle?: string // Display name for the conversation
+      autoAcceptEnabled?: boolean // Whether auto-accept toggle is ON
+    }
+  ) => {
     try {
       // Pass all options including permission-related fields to executeClaudeQuery
       await executeClaudeQuery(options, event.sender)
@@ -1328,7 +1579,51 @@ ipcMain.handle(
   }
 )
 
+let tray: Tray | null = null
+
 makeAppWithSingleInstanceLock(async () => {
   await app.whenReady()
+
+  // Create tray icon
+  const trayIconPath = join(__dirname, '../resources/public/logo.svg')
+  const trayIcon = nativeImage.createFromPath(trayIconPath)
+  tray = new Tray(trayIcon.resize({ width: 16, height: 16 }))
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show AlmondCoder',
+      click: () => {
+        const windows = BrowserWindow.getAllWindows()
+        if (windows.length > 0) {
+          windows[0].show()
+          windows[0].focus()
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit()
+      },
+    },
+  ])
+
+  tray.setToolTip('AlmondCoder')
+  tray.setContextMenu(contextMenu)
+
+  // Handle tray icon click to show/hide window
+  tray.on('click', () => {
+    const windows = BrowserWindow.getAllWindows()
+    if (windows.length > 0) {
+      if (windows[0].isVisible()) {
+        windows[0].hide()
+      } else {
+        windows[0].show()
+        windows[0].focus()
+      }
+    }
+  })
+
   await makeAppSetup(MainWindow)
 })

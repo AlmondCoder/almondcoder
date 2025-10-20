@@ -1,4 +1,8 @@
-import { query, type CanUseTool, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import {
+  query,
+  type CanUseTool,
+  type PermissionResult,
+} from '@anthropic-ai/claude-agent-sdk'
 import type { BrowserWindow } from 'electron'
 import { ipcMain } from 'electron'
 
@@ -16,9 +20,9 @@ export interface ClaudeSDKOptions {
   resume?: string // Session ID to resume
 
   // New fields for permission system:
-  promptId?: string            // Which conversation is this (needed to route permissions)
-  conversationTitle?: string   // Display name for UI (first 50 chars of prompt)
-  autoAcceptEnabled?: boolean  // Whether auto-accept is enabled (bypass permissions)
+  promptId?: string // Which conversation is this (needed to route permissions)
+  conversationTitle?: string // Display name for UI (first 50 chars of prompt)
+  autoAcceptEnabled?: boolean // Whether auto-accept is enabled (bypass permissions)
 }
 
 export async function executeClaudeQuery(
@@ -28,8 +32,8 @@ export async function executeClaudeQuery(
   const {
     prompt,
     workingDirectory,
-    allowedTools = [ 'Read', 'Glob', 'Grep'],
-    permissionMode = 'default',  // Changed from 'acceptEdits' to 'default' to use canUseTool
+    allowedTools = ['Read', 'Glob', 'Grep'],
+    permissionMode = 'default', // Changed from 'acceptEdits' to 'default' to use canUseTool
     resume,
     promptId,
     conversationTitle,
@@ -65,7 +69,9 @@ export async function executeClaudeQuery(
 
     // FAST PATH: If auto-accept is enabled, immediately allow without asking
     if (autoAcceptEnabled) {
-      console.log(`✅ [Permission] Auto-accept enabled, allowing "${toolName}" immediately`)
+      console.log(
+        `✅ [Permission] Auto-accept enabled, allowing "${toolName}" immediately`
+      )
       return { behavior: 'allow', updatedInput: toolInput }
     }
 
@@ -73,7 +79,9 @@ export async function executeClaudeQuery(
     // Generate unique request ID to track this specific permission request
     const requestId = `${promptId || 'unknown'}-${Date.now()}-${Math.random()}`
 
-    console.log(`⏸️  [Permission] Pausing execution, requesting user approval for "${toolName}"`)
+    console.log(
+      `⏸️  [Permission] Pausing execution, requesting user approval for "${toolName}"`
+    )
     console.log(`   Request ID: ${requestId}`)
 
     // Send permission request to renderer via IPC
@@ -93,12 +101,14 @@ export async function executeClaudeQuery(
     // LOGIC: We create a Promise that will be resolved when the user either:
     // 1. Clicks "Accept" button → resolve with 'allow'
     // 2. Types a new prompt → resolve with 'deny' + new prompt message
-    // 3. Timeout (30s) → resolve with 'deny' + timeout message
+    // 3. Timeout (10m) → resolve with 'deny' + timeout message
     return new Promise<PermissionResult>((resolve, reject) => {
-      // Timeout: Auto-deny after 30 seconds to prevent hanging
+      // Timeout: Auto-deny after 10 minutes to prevent hanging
       const timeout = setTimeout(() => {
         cleanup()
-        console.log(`⏰ [Permission] Request ${requestId} timed out after 30 seconds`)
+        console.log(
+          `⏰ [Permission] Request ${requestId} timed out after 10 minutes`
+        )
 
         // Notify renderer that this request timed out
         sender.send('tool-permission-timeout', { requestId })
@@ -106,19 +116,22 @@ export async function executeClaudeQuery(
         // Deny the tool execution
         resolve({
           behavior: 'deny',
-          message: 'Permission request timed out (30 seconds). Please try again.',
+          message:
+            'Permission request timed out (10 minutes). Please try again.',
         })
-      }, 30000)  // 30 second timeout
+      }, 600000) // 10 minute timeout
 
       // ============================================================================
       // Listen for Accept Response
       // ============================================================================
       // LOGIC: User clicked "Accept" button in the UI
       const acceptListener = (_event: any, data: { requestId: string }) => {
-        if (data.requestId !== requestId) return  // Not for this request, ignore
+        if (data.requestId !== requestId) return // Not for this request, ignore
 
         cleanup()
-        console.log(`✅ [Permission] User accepted "${toolName}" for request ${requestId}`)
+        console.log(
+          `✅ [Permission] User accepted "${toolName}" for request ${requestId}`
+        )
 
         // Allow the tool to execute
         resolve({ behavior: 'allow', updatedInput: toolInput })
@@ -129,11 +142,16 @@ export async function executeClaudeQuery(
       // ============================================================================
       // LOGIC: User typed a new prompt instead of accepting, meaning they want
       // to override Claude's decision and give different instructions
-      const cancelListener = (_event: any, data: { requestId: string; newPrompt: string }) => {
-        if (data.requestId !== requestId) return  // Not for this request, ignore
+      const cancelListener = (
+        _event: any,
+        data: { requestId: string; newPrompt: string }
+      ) => {
+        if (data.requestId !== requestId) return // Not for this request, ignore
 
         cleanup()
-        console.log(`❌ [Permission] User cancelled "${toolName}" with new prompt: "${data.newPrompt.substring(0, 50)}..."`)
+        console.log(
+          `❌ [Permission] User cancelled "${toolName}" with new prompt: "${data.newPrompt.substring(0, 50)}..."`
+        )
 
         // Deny the tool and pass the new prompt as context to Claude
         resolve({
@@ -181,9 +199,9 @@ export async function executeClaudeQuery(
       options: {
         cwd: workingDirectory,
         allowedTools,
-        permissionMode,  // Now 'default' instead of 'acceptEdits'
-        canUseTool,      // ✨ ADD OUR CUSTOM PERMISSION CALLBACK
-        resume,          // Session resumption
+        permissionMode, // Now 'default' instead of 'acceptEdits'
+        canUseTool, // ✨ ADD OUR CUSTOM PERMISSION CALLBACK
+        resume, // Session resumption
         includePartialMessages: false, // CRITICAL: Enable streaming of partial messages
         model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', // Override to fix bug
 
@@ -222,7 +240,9 @@ export async function executeClaudeQuery(
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
     }
 
-    console.log(`✅ Claude SDK query completed successfully (${messageCount} messages)`)
+    console.log(
+      `✅ Claude SDK query completed successfully (${messageCount} messages)`
+    )
   } catch (error) {
     console.error('❌ Error during Claude SDK query:', error)
     console.error(`   Streamed ${messageCount} messages before error`)
@@ -231,18 +251,21 @@ export async function executeClaudeQuery(
     const errorMessage = error instanceof Error ? error.message : String(error)
     sender.send('command-output', {
       type: 'stderr',
-      data: JSON.stringify({
-        type: 'error',
-        error: errorMessage,
-        messageCount,
-      }) + '\n',
+      data:
+        JSON.stringify({
+          type: 'error',
+          error: errorMessage,
+          messageCount,
+        }) + '\n',
       rawData: false,
     })
 
     // If we got at least one message, the query partially succeeded
     // Don't throw if we got a result message (indicates completion)
     if (messageCount > 0 && errorMessage.includes('exited with code 1')) {
-      console.log('⚠️  Process exited with code 1, but messages were received. Treating as success.')
+      console.log(
+        '⚠️  Process exited with code 1, but messages were received. Treating as success.'
+      )
       return
     }
 

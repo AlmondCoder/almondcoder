@@ -8,7 +8,7 @@ import './globals.css'
 
 ReactDom.createRoot(document.querySelector('app') as HTMLElement).render(
   <React.StrictMode>
-    <ThemeProvider defaultTheme="dark">
+    <ThemeProvider defaultTheme="light">
       <AppRoutes />
     </ThemeProvider>
   </React.StrictMode>

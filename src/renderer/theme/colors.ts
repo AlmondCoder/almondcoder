@@ -9,6 +9,7 @@ export interface ColorPalette {
     card: string
     input: string
     overlay: string
+    labels?: string
   }
 
   // Border colors
@@ -113,6 +114,7 @@ export const themes: Record<ThemeName, ColorPalette> = {
       card: 'rgb(31 41 55)', // gray-800
       input: 'rgb(31 41 55)', // gray-800
       overlay: 'rgba(31, 41, 55, 0.9)', // gray-800/90
+      labels: 'rgba(75, 85, 99, 0.5)', // gray-600/50
     },
     border: {
       primary: 'rgb(55 65 81)', // gray-700
@@ -198,25 +200,26 @@ export const themes: Record<ThemeName, ColorPalette> = {
 
   light: {
     background: {
-      primary: 'rgb(255 255 255)', // white
-      secondary: 'rgb(249 250 251)', // gray-50
-      tertiary: 'rgb(243 244 246)', // gray-100
+      primary: 'rgb(255 255 255)', // white - main content area
+      secondary: 'rgb(236 236 236)', // light gray - sidebar (from screenshot)
+      tertiary: 'rgb(243 244 246)', // gray-100 - hover states
       card: 'rgb(255 255 255)', // white
       input: 'rgb(255 255 255)', // white
       overlay: 'rgba(255, 255, 255, 0.9)', // white/90
+      labels: 'rgb(249, 250, 251)', // gray-400/50
     },
     border: {
-      primary: 'rgb(209 213 219)', // gray-300
+      primary: 'rgb(217 217 217)', // lighter gray for subtle borders
       secondary: 'rgba(209, 213, 219, 0.3)', // gray-300/30
-      focus: 'rgb(59 130 246)', // blue-500
+      focus: 'rgb(217 217 217)', //lighter gray for subtle borders
       hover: 'rgba(156, 163, 175, 0.5)', // gray-400/50
     },
     text: {
       primary: 'rgb(17 24 39)', // gray-900
-      secondary: 'rgb(55 65 81)', // gray-700
+      secondary: 'rgb(45 45 45)', // dark gray - icons (from screenshot)
       tertiary: 'rgb(107 114 128)', // gray-500
       accent: 'rgb(37 99 235)', // blue-600
-      muted: 'rgb(156 163 175)', // gray-400
+      muted: 'rgb(107 114 128)', // gray-400
     },
     status: {
       success: 'rgb(34 197 94)', // green-500
@@ -226,18 +229,18 @@ export const themes: Record<ThemeName, ColorPalette> = {
     },
     interactive: {
       primary: {
-        background: 'rgb(37 99 235)', // blue-600
-        backgroundHover: 'rgb(29 78 216)', // blue-700
-        text: 'rgb(255 255 255)', // white
-        border: 'rgb(37 99 235)', // blue-600
-        borderHover: 'rgb(29 78 216)', // blue-700
+        background: 'rgb(45 45 45)', // dark gray for selected state
+        backgroundHover: 'rgb(220 220 220)', // very subtle hover
+        text: 'rgb(255 255 255)', // white text on dark background
+        border: 'rgb(200 200 200)', // subtle border
+        borderHover: 'rgb(180 180 180)', // slightly darker on hover
       },
       secondary: {
-        background: 'rgb(243 244 246)', // gray-100
-        backgroundHover: 'rgb(229 231 235)', // gray-200
-        text: 'rgb(17 24 39)', // gray-900
-        border: 'rgb(209 213 219)', // gray-300
-        borderHover: 'rgb(156 163 175)', // gray-400
+        background: 'transparent', // no background for inactive nav items
+        backgroundHover: 'rgba(0, 0, 0, 0.05)', // very subtle hover
+        text: 'rgb(45 45 45)', // dark gray icons
+        border: 'transparent', // no border
+        borderHover: 'transparent', // no border on hover
       },
       accent: {
         background: 'rgb(22 163 74)', // green-600
@@ -295,6 +298,7 @@ export const themes: Record<ThemeName, ColorPalette> = {
       card: 'rgb(16 16 32)', // custom dark blue
       input: 'rgb(24 24 48)', // custom dark blue
       overlay: 'rgba(16, 16, 32, 0.9)', // custom dark blue/90
+      labels: 'rgba(45, 55, 72, 0.6)', // custom blue-gray/60
     },
     border: {
       primary: 'rgb(45 55 72)', // custom blue-gray
@@ -386,6 +390,7 @@ export const themes: Record<ThemeName, ColorPalette> = {
       card: 'rgb(21 94 117)', // custom teal
       input: 'rgb(30 115 140)', // custom light teal
       overlay: 'rgba(21, 94, 117, 0.9)', // custom teal/90
+      labels: 'rgba(56, 161, 105, 0.5)', // custom sea green/50
     },
     border: {
       primary: 'rgb(56 161 105)', // custom sea green

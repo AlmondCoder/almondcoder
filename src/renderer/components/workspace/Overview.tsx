@@ -298,7 +298,9 @@ export function Overview({
           // If deleteWorktree is true, find and delete associated worktrees
           if (deleteWorktree) {
             try {
-              const worktreesResult = await App.getProjectWorktrees(projectContext.projectPath)
+              const worktreesResult = await App.getProjectWorktrees(
+                projectContext.projectPath
+              )
               if (worktreesResult.success) {
                 // Find worktrees associated with the merged branch
                 const branchWorktrees = worktreesResult.worktrees.filter(
@@ -313,7 +315,9 @@ export function Overview({
               }
             } catch (worktreeError) {
               console.error('Error deleting worktrees:', worktreeError)
-              alert('Merge successful but failed to delete associated worktrees')
+              alert(
+                'Merge successful but failed to delete associated worktrees'
+              )
             }
           }
 

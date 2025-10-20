@@ -4,7 +4,9 @@
 export function playNotificationSound() {
   try {
     // Using the Web Audio API to generate a pleasant notification sound
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const audioContext = new (
+      window.AudioContext || (window as any).webkitAudioContext
+    )()
 
     // Create oscillator for a pleasant "ding" sound
     const oscillator = audioContext.createOscillator()

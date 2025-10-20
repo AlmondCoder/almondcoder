@@ -1,11 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import {
-  MessageSquare,
-  GitMerge,
-  FolderOpen,
-  User,
-} from 'lucide-react'
+import { MessageSquare, GitMerge, FolderOpen, User } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
 import { Overview } from '../components/workspace/Overview'
 import { Prompts } from '../components/workspace/Prompts'
@@ -19,11 +14,23 @@ interface LocationState {
 }
 
 export function WorkspaceScreen() {
-  const { theme } = useTheme()
+  const { theme, setCurrentProject } = useTheme()
   const themeClasses = createThemeClasses(theme)
 
   const location = useLocation()
   const projectContext = location.state as LocationState
+
+  // Load project settings when workspace is opened
+  useEffect(() => {
+    if (projectContext?.projectPath) {
+      setCurrentProject(projectContext.projectPath)
+    }
+
+    // Cleanup when leaving workspace
+    return () => {
+      setCurrentProject(null)
+    }
+  }, [projectContext?.projectPath])
   const [activeSection, setActiveSection] = useState('prompts')
   const [message, setMessage] = useState('')
   const [chatHistory, setChatHistory] = useState([
@@ -68,9 +75,7 @@ export function WorkspaceScreen() {
     { icon: FolderOpen, label: 'Files', key: 'files' },
   ]
 
-  const bottomMenuItems = [
-    { icon: User, label: 'Account', key: 'account' },
-  ]
+  const bottomMenuItems = [{ icon: User, label: 'Account', key: 'account' }]
 
   const renderContent = () => {
     switch (activeSection) {
@@ -95,32 +100,36 @@ export function WorkspaceScreen() {
       <div
         className={`${themeClasses.bgSecondary} border-r ${themeClasses.borderPrimary} w-16 flex flex-col items-center py-4`}
       >
-        {/* App Logo/Icon at top */}
+        {/* App Logo at top */}
         <div className="mb-8">
           <div
-            className={`w-10 h-10 rounded-lg ${themeClasses.btnPrimary} flex items-center justify-center font-bold text-sm`}
+            className={`w-12 h-12 rounded-xl bg-[rgb(45,45,45)] flex items-center justify-center p-2`}
           >
-            AC
+            <img
+              alt="Almond Coder"
+              className="w-full h-full object-contain"
+              src="/logo.svg"
+            />
           </div>
         </div>
 
         {/* Top Menu Items */}
-        <div className="flex flex-col items-center space-y-2">
+        <div className="flex flex-col items-center space-y-1">
           {topMenuItems.map((item, index) => (
             <button
-              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all group relative ${
+              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 group relative ${
                 activeSection === item.key
-                  ? themeClasses.btnPrimary
-                  : `${themeClasses.textSecondary} hover:${themeClasses.bgTertiary} hover:${themeClasses.textPrimary}`
+                  ? `bg-[rgb(45,45,45)] text-white`
+                  : `${themeClasses.textSecondary} hover:bg-[rgba(0,0,0,0.05)]`
               }`}
               key={index}
               onClick={() => setActiveSection(item.key)}
               title={item.label}
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon className="w-6 h-6" />
               {/* Tooltip on hover */}
               <span
-                className={`absolute left-full ml-2 px-2 py-1 rounded ${themeClasses.bgTertiary} text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`}
+                className={`absolute left-full ml-2 px-3 py-1.5 rounded-md ${themeClasses.bgTertiary} ${themeClasses.textPrimary} text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-50`}
               >
                 {item.label}
               </span>
@@ -132,22 +141,22 @@ export function WorkspaceScreen() {
         <div className="flex-1" />
 
         {/* Bottom Menu Items */}
-        <div className="flex flex-col items-center space-y-2">
+        <div className="flex flex-col items-center space-y-1">
           {bottomMenuItems.map((item, index) => (
             <button
-              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all group relative ${
+              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 group relative ${
                 activeSection === item.key
-                  ? themeClasses.btnPrimary
-                  : `${themeClasses.textSecondary} hover:${themeClasses.bgTertiary} hover:${themeClasses.textPrimary}`
+                  ? `bg-[rgb(45,45,45)] text-white`
+                  : `${themeClasses.textSecondary} hover:bg-[rgba(0,0,0,0.05)]`
               }`}
               key={index}
               onClick={() => setActiveSection(item.key)}
               title={item.label}
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon className="w-6 h-6" />
               {/* Tooltip on hover */}
               <span
-                className={`absolute left-full ml-2 px-2 py-1 rounded ${themeClasses.bgTertiary} text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`}
+                className={`absolute left-full ml-2 px-3 py-1.5 rounded-md ${themeClasses.bgTertiary} ${themeClasses.textPrimary} text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-50`}
               >
                 {item.label}
               </span>
@@ -157,7 +166,7 @@ export function WorkspaceScreen() {
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 overflow-y-auto">{renderContent()}</div>
+      <div className="flex-1 overflow-hidden">{renderContent()}</div>
     </div>
   )
 }

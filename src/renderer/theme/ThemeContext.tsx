@@ -4,6 +4,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useRef,
   type ReactNode,
 } from 'react'
 import { type ThemeName, type ColorPalette, getCurrentTheme } from './colors'
@@ -24,6 +25,8 @@ interface ThemeContextType {
   fontPreferences: FontPreferences
   setFontSize: (size: FontSize) => void
   setFontFamily: (family: FontFamily) => void
+  loadProjectSettings: (projectPath: string) => Promise<void>
+  setCurrentProject: (projectPath: string | null) => void
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
@@ -35,7 +38,7 @@ interface ThemeProviderProps {
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   children,
-  defaultTheme = 'dark',
+  defaultTheme = 'light',
 }) => {
   const [themeName, setThemeName] = useState<ThemeName>(defaultTheme)
   const [theme, setTheme] = useState<ColorPalette>(
@@ -45,6 +48,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     size: 'base',
     family: 'inter',
   })
+  const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(
+    null
+  )
+
+  // Track if we're currently loading settings to prevent infinite loop
+  const isLoadingSettings = useRef(false)
 
   const availableThemes: ThemeName[] = ['dark', 'light', 'midnight', 'ocean']
 
@@ -69,18 +78,96 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     }
   }, [])
 
-  // Save theme to localStorage when changed
+  // Save theme to localStorage and project settings when changed
   useEffect(() => {
-    localStorage.setItem('almondcoder-theme', themeName)
-  }, [themeName])
+    // Don't save if we're currently loading settings
+    if (isLoadingSettings.current) return
 
-  // Save font preferences to localStorage when changed
+    localStorage.setItem('almondcoder-theme', themeName)
+
+    // Also save to project settings if a project is open
+    if (currentProjectPath) {
+      saveToProjectSettings()
+    }
+  }, [themeName, currentProjectPath])
+
+  // Save font preferences to localStorage and project settings when changed
   useEffect(() => {
+    // Don't save if we're currently loading settings
+    if (isLoadingSettings.current) return
+
     localStorage.setItem(
       'almondcoder-font-preferences',
       JSON.stringify(fontPreferences)
     )
-  }, [fontPreferences])
+
+    // Also save to project settings if a project is open
+    if (currentProjectPath) {
+      saveToProjectSettings()
+    }
+  }, [fontPreferences, currentProjectPath])
+
+  // Helper to save settings to project
+  const saveToProjectSettings = async () => {
+    if (!currentProjectPath) return
+
+    try {
+      await window.App.saveProjectSettings(currentProjectPath, {
+        theme: {
+          name: themeName,
+          fontPreferences: {
+            size: fontPreferences.size,
+            family: fontPreferences.family,
+          },
+        },
+      })
+    } catch (error) {
+      console.error('Failed to save project settings:', error)
+    }
+  }
+
+  // Load settings from project
+  const loadProjectSettings = async (projectPath: string) => {
+    try {
+      // Set flag to prevent save during load
+      isLoadingSettings.current = true
+
+      const settings = await window.App.getProjectSettings(projectPath)
+
+      if (settings?.theme) {
+        const { name, fontPreferences: projectFontPrefs } = settings.theme
+
+        // Apply theme name if valid
+        if (name && availableThemes.includes(name as ThemeName)) {
+          setThemeName(name as ThemeName)
+          setTheme(getCurrentTheme(name as ThemeName))
+        }
+
+        // Apply font preferences if available
+        if (projectFontPrefs) {
+          setFontPreferences({
+            size: (projectFontPrefs.size as FontSize) || 'base',
+            family: (projectFontPrefs.family as FontFamily) || 'inter',
+          })
+        }
+      }
+
+      // Reset flag after loading is complete
+      isLoadingSettings.current = false
+    } catch (error) {
+      console.error('Failed to load project settings:', error)
+      // Make sure to reset flag even on error
+      isLoadingSettings.current = false
+    }
+  }
+
+  // Set the current project path
+  const handleSetCurrentProject = (projectPath: string | null) => {
+    setCurrentProjectPath(projectPath)
+    if (projectPath) {
+      loadProjectSettings(projectPath)
+    }
+  }
 
   // Apply CSS custom properties to document root
   useEffect(() => {
@@ -303,6 +390,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     fontPreferences,
     setFontSize: handleSetFontSize,
     setFontFamily: handleSetFontFamily,
+    loadProjectSettings,
+    setCurrentProject: handleSetCurrentProject,
   }
 
   return (

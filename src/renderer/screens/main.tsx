@@ -295,7 +295,7 @@ export function MainScreen() {
             <img
               alt="Almond Coder"
               className="w-16 h-16 opacity-30 hover:opacity-50 transition-opacity"
-              src="/AlmondTransparentLogo.svg"
+              src="/logo.svg"
             />
           </div>
         </div>

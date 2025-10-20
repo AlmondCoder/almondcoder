@@ -1,43 +1,39 @@
 import { useState, useEffect, useRef } from 'react'
-import { ClipboardList, Play, ChevronDown } from 'lucide-react'
+import {
+  ClipboardList,
+  Play,
+  ChevronDown,
+  ArrowUp,
+  FileEdit,
+  BookOpen,
+  Terminal,
+  ListTodo,
+  Search,
+  FolderOpen,
+  Globe,
+  CheckSquare,
+  Notebook,
+  Zap,
+  XCircle,
+  Wrench
+} from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import type {
   ConversationHistory,
   EnhancedPromptHistoryItem,
   PendingPermission,
-  ToolPermissionRequest
+  ToolPermissionRequest,
+  BusyConversation,
 } from '../../../shared/types'
 import { playNotificationSound } from '../../utils/notificationSound'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { detectLanguageFromPath } from '../../utils/languageDetection'
 
 interface ProjectContext {
   projectPath: string
   selectedTool: string
   selectedBranch: string
-}
-
-// ============================================================================
-// BusyConversation Interface
-// ============================================================================
-// Tracks the execution state of conversations running in parallel
-// LOGIC: We need to know when a conversation is actively running, completed,
-// encountered an error, OR is waiting for user permission to execute a tool.
-// The 'waiting_permission' status is critical for the permission system.
-interface BusyConversation {
-  conversation: ConversationHistory
-
-  // Status can be:
-  // - 'running': Claude is actively processing (no permission needed)
-  // - 'waiting_permission': Paused, waiting for user to Accept or override with new prompt
-  // - 'completed': Conversation finished successfully
-  // - 'error': Conversation encountered an error
-  status: 'running' | 'waiting_permission' | 'completed' | 'error'
-
-  sessionId?: string  // Claude SDK session ID for resumption
-  error?: string      // Error message if status is 'error'
-
-  // When status is 'waiting_permission', this contains details about what tool
-  // is waiting for approval. This allows the UI to show exactly what Claude wants to do.
-  pendingPermission?: PendingPermission
 }
 
 interface ConversationViewProps {
@@ -49,19 +45,31 @@ interface ConversationViewProps {
   isPromptBusy: (promptId: string | null) => boolean
   newConversation: () => ConversationHistory
   busyConversations: Map<string, BusyConversation>
-  setBusyConversations: (conversations: Map<string, BusyConversation> | ((prev: Map<string, BusyConversation>) => Map<string, BusyConversation>)) => void
+  setBusyConversations: (
+    conversations:
+      | Map<string, BusyConversation>
+      | ((prev: Map<string, BusyConversation>) => Map<string, BusyConversation>)
+  ) => void
   promptHistory: EnhancedPromptHistoryItem[]
   setPromptHistory: (history: EnhancedPromptHistoryItem[]) => void
+  loadAndProcessPromptHistory: (projectPath: string) => Promise<void>
 }
 
 interface ChatMessage {
   id: string
-  type: 'init' | 'text' | 'tool_use' | 'tool_result' | 'result' | 'permission_request' | 'permission_response'
+  type:
+    | 'init'
+    | 'text'
+    | 'tool_use'
+    | 'tool_result'
+    | 'result'
+    | 'permission_request'
+    | 'permission_response'
   timestamp: Date
 
   // For text messages
   text?: string
-  isUser?: boolean  // Distinguish user messages from AI messages
+  isUser?: boolean // Distinguish user messages from AI messages
 
   // For tool use
   toolName?: string
@@ -86,13 +94,60 @@ interface ChatMessage {
   requestId?: string
   permissionStatus?: 'pending' | 'accepted' | 'cancelled' | 'timeout'
   respondedBy?: 'user' | 'system'
-  newPrompt?: string  // For cancelled permissions with override
+  newPrompt?: string // For cancelled permissions with override
 }
 
 enum Response {
   user = 'user',
   system = 'system',
-  ai = 'ai'
+  ai = 'ai',
+}
+
+// Helper function to get tool icon component
+const getToolIcon = (toolName: string) => {
+  const iconMap: Record<string, any> = {
+    Write: FileEdit,
+    Edit: FileEdit,
+    Read: BookOpen,
+    Bash: Terminal,
+    Task: ListTodo,
+    Grep: Search,
+    Glob: FolderOpen,
+    WebFetch: Globe,
+    TodoWrite: CheckSquare,
+    NotebookEdit: Notebook,
+    SlashCommand: Zap,
+    BashOutput: Terminal,
+    KillShell: XCircle,
+  }
+  return iconMap[toolName] || Wrench
+}
+
+// Helper function to extract tool description
+const getToolDescription = (toolName: string, toolInput: any): string => {
+  if (!toolInput) return ''
+
+  switch (toolName) {
+    case 'Write':
+    case 'Edit':
+    case 'Read':
+      return toolInput.file_path || ''
+    case 'Bash':
+      return toolInput.command
+        ? toolInput.command.substring(0, 50) +
+            (toolInput.command.length > 50 ? '...' : '')
+        : toolInput.description || ''
+    case 'Task':
+      return toolInput.description || ''
+    case 'Grep':
+      return `"${toolInput.pattern}" in ${toolInput.path || 'files'}`
+    case 'Glob':
+      return toolInput.pattern || ''
+    case 'WebFetch':
+      return toolInput.url || ''
+    default:
+      return ''
+  }
 }
 
 export function ConversationView({
@@ -107,26 +162,30 @@ export function ConversationView({
   setBusyConversations,
   promptHistory,
   setPromptHistory,
+  loadAndProcessPromptHistory,
 }: ConversationViewProps) {
-  const { theme } = useTheme()
+  const { theme, themeName } = useTheme()
   const themeClasses = createThemeClasses(theme)
+  const isLightTheme = themeName === 'light'
 
   const [currentPrompt, setCurrentPrompt] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [activePills, setActivePills] = useState<Set<number>>(new Set())
+  const [selectedPills, setSelectedPills] = useState<
+    Array<{ label: string; text: string }>
+  >([])
+  const [isPillDropdownOpen, setIsPillDropdownOpen] = useState(false)
+  const [pillSearchText, setPillSearchText] = useState('')
 
-  const [selectedAITool, setSelectedAITool] = useState<
-    'claude-code' | 'codex' | 'cursor-cli'
-  >('claude-code')
   const [selectedBranch, setSelectedBranch] = useState<string>('')
   const [selectedWorktree, setSelectedWorktree] = useState<string | null>(null)
-  const [isAIToolDropdownOpen, setIsAIToolDropdownOpen] = useState(false)
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false)
   const [isAutoAcceptEnabled, setIsAutoAcceptEnabled] = useState(false)
-  const [showToolDetails, setShowToolDetails] = useState(false)  // Toggle to show/hide tool input details
 
   const chatContainerRef = useRef<HTMLDivElement>(null)
+  const chatMessagesScrollRef = useRef<HTMLDivElement>(null)
   const selectedConversationRef = useRef(selectedConversation)
+  const pillDropdownRef = useRef<HTMLDivElement>(null)
 
   const isNewConversation = selectedConversation.promptId === '+new'
 
@@ -134,6 +193,34 @@ export function ConversationView({
   useEffect(() => {
     selectedConversationRef.current = selectedConversation
   }, [selectedConversation])
+
+  // Auto-scroll to bottom when conversation loads or new messages arrive
+  useEffect(() => {
+    if (chatMessagesScrollRef.current && chatMessages.length > 0) {
+      chatMessagesScrollRef.current.scrollTop = chatMessagesScrollRef.current.scrollHeight
+    }
+  }, [selectedConversation.promptId, chatMessages.length])
+
+  // Close pill dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        pillDropdownRef.current &&
+        !pillDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsPillDropdownOpen(false)
+        setPillSearchText('')
+      }
+    }
+
+    if (isPillDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isPillDropdownOpen])
 
   // Prompt pills data
   const promptPills = [
@@ -164,9 +251,14 @@ export function ConversationView({
     const loadConversationMessages = async () => {
       if (!isNewConversation && selectedConversation.conversationLogPath) {
         try {
-          console.log('Loading conversation from:', selectedConversation.conversationLogPath)
+          console.log(
+            'Loading conversation from:',
+            selectedConversation.conversationLogPath
+          )
 
-          const fileContent = await window.App.readConversationLog(selectedConversation.conversationLogPath)
+          const fileContent = await window.App.readConversationLog(
+            selectedConversation.conversationLogPath
+          )
 
           if (!fileContent || fileContent.length === 0) {
             setChatMessages([])
@@ -179,7 +271,11 @@ export function ConversationView({
             const { timestamp, data, from } = entry
 
             // 1. Handle user prompt messages (from: "user")
-            if (from === 'user' && data.content?.type === 'text' && data.content?.text) {
+            if (
+              from === 'user' &&
+              data.content?.type === 'text' &&
+              data.content?.text
+            ) {
               messages.push({
                 id: `user-${index}`,
                 type: 'text',
@@ -190,7 +286,10 @@ export function ConversationView({
             }
 
             // 2. Handle init message (system initialization)
-            if (data.content?.type === 'system' && data.content?.subtype === 'init') {
+            if (
+              data.content?.type === 'system' &&
+              data.content?.subtype === 'init'
+            ) {
               messages.push({
                 id: `init-${index}`,
                 type: 'init',
@@ -336,11 +435,13 @@ export function ConversationView({
             requestId: request.requestId,
             toolName: request.toolName,
             toolInput: request.toolInput,
-            timestamp: new Date(request.timestamp)
+            timestamp: new Date(request.timestamp),
           }
 
           updatedMap.set(request.promptId, busyConv)
-          console.log('✅ [Permission] Updated conversation status to waiting_permission')
+          console.log(
+            '✅ [Permission] Updated conversation status to waiting_permission'
+          )
 
           // ============================================================================
           // Log Permission Request to Conversation File
@@ -358,8 +459,8 @@ export function ConversationView({
                   requestId: request.requestId,
                   toolName: request.toolName,
                   toolInput: request.toolInput,
-                  status: 'pending'
-                }
+                  status: 'pending',
+                },
               },
               Response.system
             ).catch(err => {
@@ -367,7 +468,10 @@ export function ConversationView({
             })
           }
         } else {
-          console.warn('⚠️  [Permission] No busy conversation found for promptId:', request.promptId)
+          console.warn(
+            '⚠️  [Permission] No busy conversation found for promptId:',
+            request.promptId
+          )
         }
 
         return updatedMap
@@ -381,7 +485,7 @@ export function ConversationView({
     // ============================================================================
     // Handle Tool Permission Timeout
     // ============================================================================
-    // LOGIC: If user doesn't respond within 30 seconds, main process sends timeout
+    // LOGIC: If user doesn't respond within 10 minutes, main process sends timeout
     // event. We remove the pending permission and let the conversation continue
     // (it will be denied automatically by the main process).
     const handleToolTimeout = (data: { requestId: string }) => {
@@ -398,7 +502,10 @@ export function ConversationView({
             busyConv.status = 'running'
             busyConv.pendingPermission = undefined
             updatedMap.set(promptId, busyConv)
-            console.log('✅ [Permission] Cleared timed-out permission for conversation:', promptId)
+            console.log(
+              '✅ [Permission] Cleared timed-out permission for conversation:',
+              promptId
+            )
             break
           }
         }
@@ -416,7 +523,7 @@ export function ConversationView({
       console.log('🧹 [Permission] Cleaning up permission event listeners')
       window.App.removeToolPermissionListeners()
     }
-  }, [])  // ✅ Empty dependency array - listeners registered once on mount
+  }, []) // ✅ Empty dependency array - listeners registered once on mount
 
   const handlePillClick = (index: number, text: string) => {
     const newActivePills = new Set(activePills)
@@ -440,6 +547,53 @@ export function ConversationView({
     }
 
     setActivePills(newActivePills)
+  }
+
+  // New pill system handlers
+  const handleAddPill = (pill: { label: string; text: string }) => {
+    // Check if pill is already selected
+    if (selectedPills.some(p => p.label === pill.label)) {
+      return
+    }
+
+    setSelectedPills(prev => [...prev, pill])
+
+    // Add pill text to current prompt
+    setCurrentPrompt(prev => {
+      if (prev.trim()) {
+        return prev + (prev.endsWith(' ') ? '' : ' ') + pill.text
+      }
+      return pill.text
+    })
+
+    // Close dropdown and reset search
+    setIsPillDropdownOpen(false)
+    setPillSearchText('')
+  }
+
+  const handleRemovePill = (pillLabel: string) => {
+    const pillToRemove = selectedPills.find(p => p.label === pillLabel)
+    if (!pillToRemove) return
+
+    setSelectedPills(prev => prev.filter(p => p.label !== pillLabel))
+
+    // Remove pill text from current prompt
+    setCurrentPrompt(prev => {
+      return prev.replace(pillToRemove.text, '').replace(/\s+/g, ' ').trim()
+    })
+  }
+
+  const getFilteredPills = () => {
+    if (!pillSearchText.trim()) {
+      return promptPills
+    }
+
+    const search = pillSearchText.toLowerCase()
+    return promptPills.filter(
+      pill =>
+        pill.label.toLowerCase().includes(search) ||
+        pill.text.toLowerCase().includes(search)
+    )
   }
 
   const ensureGitRepositoryInitialized = async (
@@ -520,17 +674,25 @@ export function ConversationView({
     return finalBranch
   }
 
-
-  const updateConversationFile = async (file: string, jsonConversation: any, from: Response) => {
+  const updateConversationFile = async (
+    file: string,
+    jsonConversation: any,
+    from: Response
+  ) => {
     // Append to file this jsonConversation, with timestamp, and from
     try {
       const logEntry = {
         from,
         timestamp: new Date().toISOString(),
-        data: jsonConversation
+        data: jsonConversation,
       }
       await window.App.appendToConversationLog(file, logEntry)
-      console.log('✅ Appended conversation entry to file:', file, 'from:', from)
+      console.log(
+        '✅ Appended conversation entry to file:',
+        file,
+        'from:',
+        from
+      )
     } catch (error) {
       console.error('❌ Error appending to conversation file:', error)
     }
@@ -618,7 +780,11 @@ export function ConversationView({
     const busyState = busyConversations.get(selectedConversation.promptId)
 
     // Validation: Ensure there's actually a pending permission
-    if (!busyState || busyState.status !== 'waiting_permission' || !busyState.pendingPermission) {
+    if (
+      !busyState ||
+      busyState.status !== 'waiting_permission' ||
+      !busyState.pendingPermission
+    ) {
       console.warn('⚠️  [Permission] No pending permission to accept')
       return
     }
@@ -643,8 +809,8 @@ export function ConversationView({
               requestId,
               toolName,
               status: 'accepted',
-              respondedBy: 'user'
-            }
+              respondedBy: 'user',
+            },
           },
           Response.system
         )
@@ -665,15 +831,12 @@ export function ConversationView({
 
       if (busyConv) {
         busyConv.status = 'running'
-        busyConv.pendingPermission = undefined  // Clear the pending permission
+        busyConv.pendingPermission = undefined // Clear the pending permission
         updatedMap.set(selectedConversation.promptId, busyConv)
       }
 
       return updatedMap
     })
-
-    // Hide tool details after accepting
-    setShowToolDetails(false)
   }
 
   const handleExecute = async () => {
@@ -692,13 +855,19 @@ export function ConversationView({
     // Cancel the pending tool and send the new prompt as context to Claude.
     const busyState = busyConversations.get(selectedConversation.promptId)
 
-    if (busyState?.status === 'waiting_permission' && busyState.pendingPermission) {
+    if (
+      busyState?.status === 'waiting_permission' &&
+      busyState.pendingPermission
+    ) {
       const { requestId, toolName } = busyState.pendingPermission
       const conversationLogPath = busyState.conversation.conversationLogPath
 
-      console.log('❌ [Permission] User typed new prompt, cancelling pending tool:', toolName)
+      console.log(
+        '❌ [Permission] User typed new prompt, cancelling pending tool:',
+        toolName
+      )
       console.log('   Request ID:', requestId)
-      console.log('   New prompt:', userPromptText.substring(0, 50) + '...')
+      console.log('   New prompt:', userPromptText.substring(0, 200) + '...')
 
       // ============================================================================
       // Log Permission Cancellation to Conversation File
@@ -715,13 +884,16 @@ export function ConversationView({
                 toolName,
                 status: 'cancelled',
                 respondedBy: 'user',
-                newPrompt: userPromptText
-              }
+                newPrompt: userPromptText,
+              },
             },
             Response.system
           )
         } catch (err) {
-          console.error('❌ Failed to log permission cancellation to file:', err)
+          console.error(
+            '❌ Failed to log permission cancellation to file:',
+            err
+          )
         }
       }
 
@@ -730,7 +902,7 @@ export function ConversationView({
       // the new prompt as context to Claude
       window.App.cancelToolPermission({
         requestId,
-        newPrompt: userPromptText
+        newPrompt: userPromptText,
       })
 
       // Update conversation status back to 'running'
@@ -741,15 +913,12 @@ export function ConversationView({
 
         if (busyConv) {
           busyConv.status = 'running'
-          busyConv.pendingPermission = undefined  // Clear the pending permission
+          busyConv.pendingPermission = undefined // Clear the pending permission
           updatedMap.set(selectedConversation.promptId, busyConv)
         }
 
         return updatedMap
       })
-
-      // Hide tool details after cancelling
-      setShowToolDetails(false)
 
       // Don't proceed with normal execution - the SDK is already running
       // and will receive the denial message with the new prompt
@@ -794,13 +963,14 @@ export function ConversationView({
           projectContext.projectPath,
           selectedBranch
         )
-        console.log("Git Initialised on Branch: ", finalBranch)
+        console.log('Git Initialised on Branch: ', finalBranch)
 
         // Generate prompt ID
         promptId = Date.now().toString()
 
         // Create conversation log path
-        const projectName = projectContext.projectPath.split('/').pop() || 'unknown'
+        const projectName =
+          projectContext.projectPath.split('/').pop() || 'unknown'
         conversationLogPath = `/Users/user/.almondcoder/${projectName}/prompts/conversations/${promptId}.json`
 
         // Create worktree
@@ -812,7 +982,7 @@ export function ConversationView({
           promptId,
           undefined
         )
-        console.log("Created Successfully Worktree", worktreeResult)
+        console.log('Created Successfully Worktree', worktreeResult)
         if (!worktreeResult.success) {
           throw new Error(worktreeResult.error || 'Failed to create worktree')
         }
@@ -866,7 +1036,10 @@ export function ConversationView({
           }))
         )
 
-        sessionId = undefined
+        // Check if prompt file has existing session ID (from previous execution)
+        const savedPrompt = updatedHistory.find((p: any) => p.id === promptId)
+        sessionId = savedPrompt?.aiSessionId
+        console.log('🔑 Loaded session ID from database:', sessionId || 'none (will create new)')
       } else {
         // EXISTING CONVERSATION: Reuse existing context
         conversation = { ...selectedConversation }
@@ -893,7 +1066,16 @@ export function ConversationView({
           conversation.worktreePath = worktreePath
         }
 
+        // Load session ID from database if not in memory
         sessionId = conversation.aiSessionId
+        if (!sessionId) {
+          // Session ID not in memory, try loading from database
+          const historyItem = promptHistory.find(p => p.id === promptId)
+          sessionId = historyItem?.aiSessionId
+          console.log('🔑 Loaded session ID from database for existing conversation:', sessionId || 'none (will create new)')
+        } else {
+          console.log('🔑 Using session ID from memory:', sessionId)
+        }
       }
 
       // ============ PHASE 2: Common execution logic ============
@@ -921,12 +1103,18 @@ export function ConversationView({
       console.log('📡 Setting up message handler for Claude SDK...')
       console.log('📡 Handler will process messages for promptId:', promptId)
 
-      const handleClaudeMessage = async (data: { type: string; data: string }) => {
+      const handleClaudeMessage = async (data: {
+        type: string
+        data: string
+      }) => {
         console.log('🔔 handleClaudeMessage called!', data)
         try {
           console.log('🔍 Raw data received:', data)
           const sdkMessage = JSON.parse(data.data)
-          console.log('📨 Full SDK message:', JSON.stringify(sdkMessage, null, 2))
+          console.log(
+            '📨 Full SDK message:',
+            JSON.stringify(sdkMessage, null, 2)
+          )
 
           // Always log to conversation file (for all conversations, even background ones)
           await updateConversationFile(
@@ -938,10 +1126,16 @@ export function ConversationView({
           // Only update UI in real-time if this is the selected conversation
           // This enables parallel conversations - background ones save to file only
           // Use ref to avoid stale closure when user switches conversations
-          const isSelectedConversation = selectedConversationRef.current.promptId === promptId
-          console.log('🔍 Is this the selected conversation?', isSelectedConversation,
-                      'selectedConversation.promptId:', selectedConversationRef.current.promptId,
-                      'current promptId:', promptId)
+          const isSelectedConversation =
+            selectedConversationRef.current.promptId === promptId
+          console.log(
+            '🔍 Is this the selected conversation?',
+            isSelectedConversation,
+            'selectedConversation.promptId:',
+            selectedConversationRef.current.promptId,
+            'current promptId:',
+            promptId
+          )
 
           if (isSelectedConversation) {
             const newMessages = convertSDKMessageToChatMessage(sdkMessage)
@@ -950,12 +1144,16 @@ export function ConversationView({
               if (selectedConversationRef.current.promptId === promptId) {
                 return [...prev, ...newMessages]
               }
-              return prev  // Don't update if conversation changed
+              return prev // Don't update if conversation changed
             })
             console.log('✅ Updated chat messages in UI (real-time)')
           } else {
-            console.log('⏭️ Skipping real-time UI update - conversation running in background')
-            console.log('   Messages are saved to file and will load when user switches to this conversation')
+            console.log(
+              '⏭️ Skipping real-time UI update - conversation running in background'
+            )
+            console.log(
+              '   Messages are saved to file and will load when user switches to this conversation'
+            )
           }
 
           // Capture session ID for resumption
@@ -972,6 +1170,30 @@ export function ConversationView({
               return updatedBusyMap
             })
 
+            // Persist session ID to database for resumption
+            try {
+              // Reload prompt history to get latest data
+              const currentHistory = await window.App.getEnhancedPromptHistory(
+                projectContext?.projectPath || conversation.projectPath
+              )
+              const prompt = currentHistory.find((p: any) => p.id === promptId)
+
+              if (prompt) {
+                await window.App.updateEnhancedPrompt({
+                  ...prompt,
+                  startExecutionTime: new Date(prompt.startExecutionTime),
+                  createdAt: new Date(prompt.createdAt),
+                  updatedAt: new Date(),
+                  aiSessionId: sdkMessage.session_id,
+                })
+                console.log('✅ Persisted session ID to database:', sdkMessage.session_id)
+              } else {
+                console.warn('⚠️  Could not find prompt in database to update session ID:', promptId)
+              }
+            } catch (error) {
+              console.error('❌ Failed to persist session ID:', error)
+            }
+
             // Update selected conversation with session ID (only if still selected)
             conversation.aiSessionId = sdkMessage.session_id
             if (selectedConversationRef.current.promptId === promptId) {
@@ -981,13 +1203,47 @@ export function ConversationView({
 
           // Handle completion
           if (sdkMessage.type === 'result') {
-            console.log('🏁 Conversation completed with status:', sdkMessage.subtype)
+            console.log(
+              '🏁 Conversation completed with status:',
+              sdkMessage.subtype
+            )
             setBusyConversations(prev => {
               const updatedBusyMap = new Map(prev)
               updatedBusyMap.delete(promptId)
               return updatedBusyMap
             })
             console.log('✅ Removed conversation from busy map:', promptId)
+
+            // Update prompt status to 'completed' in the database
+            try {
+              const prompt = promptHistory.find(p => p.id === promptId)
+              if (prompt) {
+                await window.App.updateEnhancedPrompt({
+                  ...prompt,
+                  status: 'completed',
+                  updatedAt: new Date(),
+                })
+                console.log('✅ Updated prompt status to completed:', promptId)
+
+                // Refresh prompt history to show updated status
+                if (projectContext?.projectPath) {
+                  const updatedHistory = await window.App.getEnhancedPromptHistory(
+                    projectContext.projectPath
+                  )
+                  setPromptHistory(
+                    updatedHistory.map((item: any) => ({
+                      ...item,
+                      startExecutionTime: new Date(item.startExecutionTime),
+                      createdAt: new Date(item.createdAt),
+                      updatedAt: new Date(item.updatedAt),
+                    }))
+                  )
+                  console.log('✅ Refreshed prompt history')
+                }
+              }
+            } catch (error) {
+              console.error('❌ Error updating prompt status:', error)
+            }
 
             // Play notification sound
             playNotificationSound()
@@ -1008,17 +1264,17 @@ export function ConversationView({
           {
             prompt: userPromptText,
             workingDirectory: worktreePath,
-            allowedTools: [ 'Read', 'Glob', 'Grep'],
-            permissionMode: 'default',  // Changed: Always use 'default' to enable canUseTool callback
+            allowedTools: ['Read', 'Glob', 'Grep'],
+            permissionMode: 'default', // Changed: Always use 'default' to enable canUseTool callback
             resume: sessionId,
 
             // ✨ Permission system parameters:
             // LOGIC: Pass these to main process so canUseTool can route permissions correctly
-            promptId,  // Which conversation is making this request
-            conversationTitle: userPromptText.substring(0, 50),  // Display name for UI
-            autoAcceptEnabled: isAutoAcceptEnabled,  // Whether to bypass permission requests
+            promptId, // Which conversation is making this request
+            conversationTitle: userPromptText.substring(0, 200), // Display name for UI
+            autoAcceptEnabled: isAutoAcceptEnabled, // Whether to bypass permission requests
           },
-          handleClaudeMessage  // Pass the callback here
+          handleClaudeMessage // Pass the callback here
         )
         console.log('✅ Claude SDK execution completed successfully')
         console.log('📋 Result:', JSON.stringify(result, null, 2))
@@ -1038,15 +1294,15 @@ export function ConversationView({
           {
             content: {
               type: 'error',
-              message: sdkError instanceof Error ? sdkError.message : String(sdkError)
-            }
+              message:
+                sdkError instanceof Error ? sdkError.message : String(sdkError),
+            },
           },
           Response.system
         )
 
         throw sdkError
       }
-
     } catch (error) {
       console.error('❌ Error executing conversation:', error)
 
@@ -1058,147 +1314,565 @@ export function ConversationView({
       })
 
       if (isNewConversation) {
-        alert(`Failed to create conversation: ${error instanceof Error ? error.message : String(error)}`)
+        alert(
+          `Failed to create conversation: ${error instanceof Error ? error.message : String(error)}`
+        )
       }
     }
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full" ref={chatContainerRef}>
-      {/* Chat Messages Area - Only show if there are messages */}
-      {chatMessages.length > 0 ? (
-        <div
-          className={`flex-1 ${themeClasses.bgSecondary} rounded-lg p-4 mb-4 border ${themeClasses.borderPrimary} space-y-3 overflow-y-auto`}
-        >
-          {chatMessages.map(message => {
-            // Init message
-            if (message.type === 'init') {
-              return (
-                <div key={message.id} className="flex justify-center mb-4">
-                  <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-3 text-xs max-w-2xl">
-                    <div className="text-blue-300 font-medium mb-2">🚀 Session Started</div>
-                    <div className="text-gray-400 space-y-1">
-                      <div>Model: <span className="text-gray-300">{message.model}</span></div>
-                      <div>Directory: <span className="text-gray-300">{message.cwd}</span></div>
-                      <div>Session ID: <span className="text-gray-300 font-mono text-[10px]">{message.sessionId}</span></div>
+    <div
+      className="flex-1 flex flex-col h-full overflow-hidden"
+      ref={chatContainerRef}
+    >
+      {/* Show different layouts based on conversation state */}
+      {isNewConversation ? (
+        /* New Conversation - Centered layout for both themes */
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-full max-w-2xl px-6">
+            {/* Greeting */}
+            <div className="text-center mb-3">
+              <span
+                className={`text-sm ${isLightTheme ? 'text-gray-500' : 'text-gray-400'}`}
+              >
+                ✨ Hello, Vaibhav
+              </span>
+            </div>
+
+            {/* Main Heading */}
+            <h1
+              className={`text-4xl font-serif text-center mb-8 ${
+                isLightTheme ? 'text-gray-900' : 'text-white'
+              }`}
+            >
+              Let's make something awesome!
+            </h1>
+
+            {/* Input Container */}
+            <div className="mb-4">
+              <div
+                className={`flex items-center gap-2 rounded-lg p-3 ${
+                  isLightTheme
+                    ? 'bg-white border border-gray-300'
+                    : 'bg-gray-800 border border-gray-700'
+                }`}
+              >
+                {/* Plus Button */}
+                <button
+                  className={`flex-shrink-0 ${
+                    isLightTheme
+                      ? 'text-gray-600 hover:text-gray-900'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M12 4v16m8-8H4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                    />
+                  </svg>
+                </button>
+
+                {/* Input */}
+                <input
+                  className={`flex-1 outline-none text-sm bg-transparent ${
+                    isLightTheme
+                      ? 'text-gray-900 placeholder-gray-400'
+                      : 'text-white placeholder-gray-500'
+                  }`}
+                  onChange={e => setCurrentPrompt(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleExecute()
+                    }
+                  }}
+                  placeholder="Enter your prompt here..."
+                  type="text"
+                  value={currentPrompt}
+                />
+
+                {/* Branch Dropdown */}
+                <div className="relative">
+                  <button
+                    className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isLightTheme
+                        ? 'text-gray-700 bg-gray-50 hover:bg-gray-100 border-gray-300'
+                        : 'text-gray-300 bg-gray-700 hover:bg-gray-600 border-gray-600'
+                    }`}
+                    disabled={availableBranches.length === 0}
+                    onClick={() =>
+                      setIsBranchDropdownOpen(!isBranchDropdownOpen)
+                    }
+                  >
+                    <span className="text-green-500">🌿</span>
+                    <span>{selectedBranch || 'Select Branch'}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+
+                  {isBranchDropdownOpen && availableBranches.length > 0 && (
+                    <div
+                      className={`absolute top-full right-0 mt-2 rounded-lg shadow-xl z-20 min-w-[280px] max-h-48 overflow-y-auto ${
+                        isLightTheme
+                          ? 'bg-white border border-gray-300'
+                          : 'bg-gray-800 border border-gray-700'
+                      }`}
+                    >
+                      {getAvailableBranchesForNewPrompt().map(branch => (
+                        <button
+                          className={`w-full text-left px-4 py-3 first:rounded-t-lg last:rounded-b-lg transition-colors ${
+                            isLightTheme
+                              ? `hover:bg-gray-50 ${branch === selectedBranch ? 'bg-gray-50' : ''}`
+                              : `hover:bg-gray-700 ${branch === selectedBranch ? 'bg-gray-700' : ''}`
+                          }`}
+                          key={branch}
+                          onClick={() => {
+                            setSelectedBranch(branch)
+                            setSelectedWorktree(null)
+                            setIsBranchDropdownOpen(false)
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={
+                                isLightTheme ? 'text-gray-600' : 'text-gray-400'
+                              }
+                            >
+                              •
+                            </span>
+                            <div
+                              className={`text-sm ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}
+                            >
+                              {branch}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  </div>
+                  )}
                 </div>
-              )
+
+                {/* Execute Button */}
+                <button
+                  className={`flex-shrink-0 p-2 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isLightTheme
+                      ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                  disabled={
+                    !projectContext ||
+                    !currentPrompt.trim() ||
+                    !selectedBranch ||
+                    busyConversations.get(selectedConversation.promptId)
+                      ?.status === 'running'
+                  }
+                  onClick={handleExecute}
+                  title={
+                    !projectContext
+                      ? 'Please select a project first'
+                      : !currentPrompt.trim()
+                        ? 'Please enter a prompt'
+                        : !selectedBranch
+                          ? 'Please select a branch'
+                          : 'Execute the prompt'
+                  }
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M5 10l7-7m0 0l7 7m-7-7v18"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Prompt Pills */}
+            <div className="flex flex-wrap gap-2 justify-center">
+              {promptPills.map((pill, index) => {
+                const isActive = activePills.has(index)
+                return (
+                  <button
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border ${
+                      isActive
+                        ? themeClasses.pillActive
+                        : themeClasses.pillInactive
+                    }`}
+                    key={index}
+                    onClick={() => handlePillClick(index, pill.text)}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full transition-colors ${
+                        isActive
+                          ? themeClasses.pillActiveDot
+                          : themeClasses.pillInactiveDot
+                      }`}
+                    ></span>
+                    {pill.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      ) : chatMessages.length > 0 ? (
+        /* Existing conversation with messages */
+        <div
+          ref={chatMessagesScrollRef}
+          className={`flex-1 overflow-y-auto ${isLightTheme ? 'bg-white' : themeClasses.bgSecondary} rounded-lg p-6 border ${themeClasses.borderPrimary} space-y-4 mb-2`}
+        >
+          {chatMessages.map((message, index) => {
+            // Helper function to determine if this message should have a connecting line
+            const shouldShowConnectingLine = () => {
+              // Show line for tool_use, tool_result, and non-user text messages
+              // that are part of a sequence (not preceded by a user message)
+              if (index === 0) return false
+
+              const currentType = message.type
+              const prevMessage = chatMessages[index - 1]
+
+              // If current is a tool message, show line if previous wasn't a user message
+              if (currentType === 'tool_use' || currentType === 'tool_result') {
+                return prevMessage && !prevMessage.isUser
+              }
+
+              // If current is Claude text, show line if previous was also Claude-related
+              if (currentType === 'text' && !message.isUser) {
+                return (
+                  prevMessage &&
+                  (prevMessage.type === 'tool_use' ||
+                    prevMessage.type === 'tool_result' ||
+                    (prevMessage.type === 'text' && !prevMessage.isUser))
+                )
+              }
+
+              return false
+            }
+
+            const hasConnectingLine = shouldShowConnectingLine()
+            // Init message - hidden from view
+            if (message.type === 'init') {
+              return null
             }
 
             // Text message from User or Claude
             if (message.type === 'text') {
               if (message.isUser) {
-                // User message - align right
+                // User message - right aligned with bubble
                 return (
-                  <div key={message.id} className="flex justify-end mb-3">
-                    <div className="bg-blue-600 text-white max-w-[85%] p-3 rounded-lg ml-12">
-                      <div className="text-xs font-medium mb-2 opacity-80">You</div>
-                      <div className="text-sm whitespace-pre-wrap">{message.text}</div>
-                      <div className="text-xs opacity-70 mt-2">{message.timestamp.toLocaleTimeString()}</div>
-                    </div>
-                  </div>
-                )
-              } else {
-                // Claude message - align left
-                return (
-                  <div key={message.id} className="flex justify-start mb-3">
-                    <div className="bg-gray-700 text-gray-100 max-w-[85%] p-3 rounded-lg mr-12">
-                      <div className="text-xs font-medium text-blue-300 mb-2">Claude</div>
-                      <div className="text-sm whitespace-pre-wrap">{message.text}</div>
-                      <div className="text-xs opacity-70 mt-2">{message.timestamp.toLocaleTimeString()}</div>
+                  <div className="mb-4 flex justify-end" key={message.id}>
+                    <div
+                      className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                        isLightTheme
+                          ? 'bg-gray-100 text-gray-800'
+                          : 'bg-gray-700 text-gray-200'
+                      }`}
+                    >
+                      {message.text}
                     </div>
                   </div>
                 )
               }
+              // Claude message - left aligned, minimal styling with optional connecting line
+              return (
+                <div className="mb-4 flex" key={message.id}>
+                  {/* Connecting line */}
+                  {hasConnectingLine && (
+                    <div
+                      className="w-0.5 mr-3 border-l-2 border-dotted"
+                      style={{
+                        borderColor: isLightTheme
+                          ? 'rgba(209, 213, 219, 0.6)' // light theme border - more prominent
+                          : 'rgba(75, 85, 99, 0.7)', // dark theme border - more prominent
+                      }}
+                    />
+                  )}
+                  <div
+                    className={`flex-1 text-sm whitespace-pre-wrap ${
+                      isLightTheme ? 'text-gray-700' : 'text-gray-300'
+                    } ${hasConnectingLine ? '' : 'ml-3'}`}
+                  >
+                    {message.text}
+                  </div>
+                </div>
+              )
             }
 
             // Tool use message
             if (message.type === 'tool_use') {
+              const IconComponent = getToolIcon(message.toolName || '')
+              const description = getToolDescription(
+                message.toolName || '',
+                message.toolInput
+              )
+
+              // Check for Write tool with content
+              const hasWriteContent =
+                message.toolName === 'Write' && message.toolInput?.content
+
+              // Check for Edit tool with old_string and new_string
+              const hasEditContent =
+                message.toolName === 'Edit' &&
+                message.toolInput?.old_string &&
+                message.toolInput?.new_string
+
               return (
-                <div key={message.id} className="flex justify-start mb-3">
-                  <div className="bg-purple-900/30 border border-purple-500/30 max-w-[85%] p-3 rounded-lg mr-12">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-purple-400 font-medium text-sm">🔧 {message.toolName}</span>
+                <div className="mb-3 flex" key={message.id}>
+                  {/* Connecting line */}
+                  {hasConnectingLine && (
+                    <div
+                      className="w-0.5 mr-3 border-l-2 border-dotted"
+                      style={{
+                        borderColor: isLightTheme
+                          ? 'rgba(209, 213, 219, 0.3)' // light theme border.secondary
+                          : 'rgba(55, 65, 81, 0.3)', // dark theme border.secondary
+                      }}
+                    />
+                  )}
+
+                  <div className="flex-1">
+                    {/* Tool name line */}
+                    <div className="flex items-center gap-2 py-1 mb-2">
+                      <IconComponent
+                        className="w-4 h-4"
+                        style={{ color: theme.text.tertiary }}
+                      />
+                      <span
+                        className="text-sm font-medium"
+                        style={{ color: theme.text.primary }}
+                      >
+                        {message.toolName}
+                      </span>
+                      {description && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor: theme.background.labels,
+                            color: theme.text.muted,
+                          }}
+                        >
+                          {description}
+                        </span>
+                      )}
                     </div>
-                    {message.toolInput && Object.keys(message.toolInput).length > 0 && (
-                      <pre className="bg-gray-900/50 rounded p-2 text-xs overflow-x-auto text-gray-300 border border-purple-500/20">
-                        {JSON.stringify(message.toolInput, null, 2)}
-                      </pre>
+
+                    {/* Code block for Write tool with content */}
+                    {hasWriteContent && (
+                      <div
+                        className={`rounded-lg border overflow-hidden ${
+                          isLightTheme
+                            ? 'bg-gray-50 border-gray-200'
+                            : 'bg-gray-900 border-gray-700'
+                        }`}
+                      >
+                        <SyntaxHighlighter
+                          language={detectLanguageFromPath(message.toolInput.file_path)}
+                          style={isLightTheme ? vs : vscDarkPlus}
+                          showLineNumbers
+                          customStyle={{
+                            margin: 0,
+                            borderRadius: 0,
+                            fontSize: '0.9rem',
+                            fontWeight: 550,
+                            background: isLightTheme ? '#f9fafb' : '#111827',
+                          }}
+                          lineNumberStyle={{
+                            minWidth: '3em',
+                            paddingRight: '1em',
+                            color: isLightTheme ? '#9ca3af' : '#6b7280',
+                            userSelect: 'none',
+                          }}
+                        >
+                          {message.toolInput.content}
+                        </SyntaxHighlighter>
+                      </div>
                     )}
-                    <div className="text-xs opacity-70 mt-2 text-purple-300">{message.timestamp.toLocaleTimeString()}</div>
+
+                    {/* Diff view for Edit tool with old_string and new_string */}
+                    {hasEditContent && (
+                      <div
+                        className={`rounded-lg border overflow-hidden ${
+                          isLightTheme
+                            ? 'bg-gray-50 border-gray-200'
+                            : 'bg-gray-900 border-gray-700'
+                        }`}
+                      >
+                        {/* Old string (removed) */}
+                        <div
+                          className="border-l-4"
+                          style={{
+                            borderColor: isLightTheme ? '#ff8182' : '#f85149',
+                          }}
+                        >
+                          <div
+                            className={`px-3 py-1 text-xs font-medium ${
+                              isLightTheme ? 'bg-gray-50' : 'bg-gray-900'
+                            }`}
+                            style={{
+                              color: isLightTheme ? '#cf222e' : '#ffb3b3',
+                            }}
+                          >
+                            - Removed
+                          </div>
+                          <SyntaxHighlighter
+                            language={detectLanguageFromPath(message.toolInput.file_path)}
+                            style={isLightTheme ? vs : vscDarkPlus}
+                            showLineNumbers
+                            customStyle={{
+                              margin: 0,
+                              borderRadius: 0,
+                              fontSize: '0.9rem',
+                              fontWeight: 550,
+                              background: isLightTheme ? '#f9fafb' : '#111827',
+                            }}
+                            lineNumberStyle={{
+                              minWidth: '3em',
+                              paddingRight: '1em',
+                              color: isLightTheme ? '#9ca3af' : '#6b7280',
+                              userSelect: 'none',
+                            }}
+                          >
+                            {message.toolInput.old_string}
+                          </SyntaxHighlighter>
+                        </div>
+
+                        {/* New string (added) */}
+                        <div
+                          className="border-l-4"
+                          style={{
+                            borderColor: isLightTheme ? '#34d058' : '#3fb950',
+                          }}
+                        >
+                          <div
+                            className={`px-3 py-1 text-xs font-medium ${
+                              isLightTheme ? 'bg-gray-50' : 'bg-gray-900'
+                            }`}
+                            style={{
+                              color: isLightTheme ? '#116329' : '#a8ffa8',
+                            }}
+                          >
+                            + Added
+                          </div>
+                          <SyntaxHighlighter
+                            language={detectLanguageFromPath(message.toolInput.file_path)}
+                            style={isLightTheme ? vs : vscDarkPlus}
+                            showLineNumbers
+                            customStyle={{
+                              margin: 0,
+                              borderRadius: 0,
+                              fontSize: '0.9rem',
+                              fontWeight: 550,
+                              background: isLightTheme ? '#f9fafb' : '#111827',
+                            }}
+                            lineNumberStyle={{
+                              minWidth: '3em',
+                              paddingRight: '1em',
+                              color: isLightTheme ? '#9ca3af' : '#6b7280',
+                              userSelect: 'none',
+                            }}
+                          >
+                            {message.toolInput.new_string}
+                          </SyntaxHighlighter>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
             }
 
-            // Tool result message
+            // Tool result message - Only show if error
             if (message.type === 'tool_result') {
-              const resultContent = typeof message.toolResult === 'string'
-                ? message.toolResult
-                : JSON.stringify(message.toolResult, null, 2)
+              // Only display tool results if there's an error
+              if (!message.isError) {
+                return null
+              }
+
+              const resultContent =
+                typeof message.toolResult === 'string'
+                  ? message.toolResult
+                  : JSON.stringify(message.toolResult, null, 2)
 
               return (
-                <div key={message.id} className="flex justify-start mb-3">
-                  <div className={`max-w-[85%] p-3 rounded-lg mr-12 ${
-                    message.isError
-                      ? 'bg-red-900/30 border border-red-500/30'
-                      : 'bg-green-900/20 border border-green-500/30'
-                  }`}>
-                    <div className={`text-xs font-medium mb-2 ${
-                      message.isError ? 'text-red-300' : 'text-green-300'
-                    }`}>
-                      {message.isError ? '❌ Tool Error' : '✅ Tool Result'}
+                <div className="flex justify-start mb-3" key={message.id}>
+                  {/* Connecting line */}
+                  {hasConnectingLine && (
+                    <div
+                      className="w-0.5 mr-3 border-l-2 border-dotted"
+                      style={{
+                        borderColor: isLightTheme
+                          ? 'rgba(209, 213, 219, 0.3)' // light theme border.secondary
+                          : 'rgba(55, 65, 81, 0.3)', // dark theme border.secondary
+                      }}
+                    />
+                  )}
+
+                  <div
+                    className={`max-w-[85%] p-3 rounded-lg mr-12 ${
+                      isLightTheme
+                        ? 'bg-red-50 border border-red-200'
+                        : 'bg-red-900/30 border border-red-500/30'
+                    }`}
+                  >
+                    <div
+                      className={`text-xs font-medium mb-2 ${
+                        isLightTheme ? 'text-red-700' : 'text-red-300'
+                      }`}
+                    >
+                      ❌ Tool Error
                     </div>
-                    <div className={`text-sm whitespace-pre-wrap max-h-64 overflow-y-auto ${
-                      message.isError ? 'text-red-200' : 'text-gray-300'
-                    }`}>
+                    <div
+                      className={`text-sm whitespace-pre-wrap max-h-64 overflow-y-auto ${
+                        isLightTheme ? 'text-red-800' : 'text-red-200'
+                      }`}
+                    >
                       {resultContent}
                     </div>
-                    <div className="text-xs opacity-70 mt-2">{message.timestamp.toLocaleTimeString()}</div>
                   </div>
                 </div>
               )
             }
 
-            // Final result message
+            // Final result message - hidden from view
             if (message.type === 'result') {
-              return (
-                <div key={message.id} className="flex justify-center mb-4">
-                  <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-3 text-xs max-w-md">
-                    <div className="text-green-300 font-medium mb-2">✅ Conversation Complete</div>
-                    <div className="text-gray-400 space-y-1">
-                      <div>Duration: <span className="text-gray-300">{message.duration}ms</span></div>
-                      <div>Cost: <span className="text-gray-300">${message.cost?.toFixed(6)}</span></div>
-                      <div>Turns: <span className="text-gray-300">{message.numTurns}</span></div>
-                    </div>
-                  </div>
-                </div>
-              )
+              return null
             }
 
             // Permission request message
             if (message.type === 'permission_request') {
               return (
-                <div key={message.id} className="flex justify-center mb-4">
-                  <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 text-xs max-w-2xl">
-                    <div className="text-yellow-300 font-medium mb-2">
-                      🔒 Permission Request: {message.toolName}
-                    </div>
-                    <div className="text-gray-400 space-y-1">
-                      <div>Status: <span className="text-yellow-300">{message.permissionStatus}</span></div>
-                      {message.toolInput && Object.keys(message.toolInput).length > 0 && (
-                        <details className="mt-2">
-                          <summary className="cursor-pointer text-gray-300 hover:text-white">
-                            Show tool input
-                          </summary>
-                          <pre className="mt-2 bg-gray-900 p-2 rounded text-[10px] overflow-x-auto">
-                            {JSON.stringify(message.toolInput, null, 2)}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
+                <div className="mb-4 flex" key={message.id}>
+                  {hasConnectingLine && (
+                    <div
+                      className="w-0.5 mr-3 border-l-2 border-dotted"
+                      style={{
+                        borderColor: isLightTheme
+                          ? 'rgba(209, 213, 219, 0.3)' // light theme border.secondary
+                          : 'rgba(55, 65, 81, 0.3)', // dark theme border.secondary
+                      }}
+                    />
+                  )}
+                  <div
+                    className={`text-xs ${
+                      isLightTheme ? 'text-gray-500' : 'text-gray-400'
+                    }`}
+                  >
+                    Waiting for permission • {message.toolName}
                   </div>
                 </div>
               )
@@ -1210,27 +1884,29 @@ export function ConversationView({
               const isCancelled = message.permissionStatus === 'cancelled'
 
               return (
-                <div key={message.id} className="flex justify-center mb-4">
-                  <div className={`border rounded-lg p-3 text-xs max-w-2xl ${
-                    isAccepted
-                      ? 'bg-green-900/20 border-green-500/30'
-                      : 'bg-red-900/20 border-red-500/30'
-                  }`}>
-                    <div className={`font-medium mb-2 ${
-                      isAccepted ? 'text-green-300' : 'text-red-300'
-                    }`}>
-                      {isAccepted ? '✅ Permission Accepted' : '❌ Permission Cancelled'}
-                    </div>
-                    <div className="text-gray-400 space-y-1">
-                      <div>Tool: <span className="text-gray-300">{message.toolName}</span></div>
-                      <div>By: <span className="text-gray-300">{message.respondedBy}</span></div>
-                      {isCancelled && message.newPrompt && (
-                        <div className="mt-2 pt-2 border-t border-gray-700">
-                          <div className="text-gray-400 text-xs mb-1">New instruction:</div>
-                          <div className="text-gray-300 italic">"{message.newPrompt}"</div>
-                        </div>
-                      )}
-                    </div>
+                <div className="mb-4 flex" key={message.id}>
+                  {hasConnectingLine && (
+                    <div
+                      className="w-0.5 mr-3 border-l-2 border-dotted"
+                      style={{
+                        borderColor: isLightTheme
+                          ? 'rgba(209, 213, 219, 0.3)' // light theme border.secondary
+                          : 'rgba(55, 65, 81, 0.3)', // dark theme border.secondary
+                      }}
+                    />
+                  )}
+                  <div
+                    className={`text-xs ${
+                      isLightTheme ? 'text-gray-500' : 'text-gray-400'
+                    }`}
+                  >
+                    {isAccepted
+                      ? 'Permission accepted'
+                      : 'Permission cancelled'}{' '}
+                    • {message.toolName}
+                    {isCancelled &&
+                      message.newPrompt &&
+                      ` • New instruction provided`}
                   </div>
                 </div>
               )
@@ -1238,392 +1914,371 @@ export function ConversationView({
 
             return null
           })}
-          {busyConversations.get(selectedConversation.promptId)?.status === 'running' && (
-            <div className="flex justify-start">
-              <div className="bg-gray-700 text-gray-100 max-w-[85%] p-3 rounded-lg mr-12">
-                <div className="text-xs font-medium text-blue-300 mb-1">
-                  Claude
-                </div>
-                <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
-                  <div
-                    className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-                    style={{ animationDelay: '0.1s' }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-                    style={{ animationDelay: '0.2s' }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-          )}
+        
         </div>
       ) : (
-        /* Empty state - Centered input with intro text */
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-full max-w-3xl px-6">
-            <div className="text-center mb-6">
-              <h2 className={`text-xl font-semibold ${themeClasses.textPrimary} mb-2`}>
-                Start a new conversation
-              </h2>
-              <p className={`text-sm ${themeClasses.textSecondary}`}>
-                Describe what you'd like to build or the problem you need help with
-              </p>
-            </div>
-          </div>
-        </div>
+        /* Empty state for existing conversation with no messages */
+        <div className="flex-1 overflow-y-auto"></div>
       )}
 
-      {/* Input Area - Always at bottom */}
-      <div className={chatMessages.length === 0 ? 'w-full max-w-3xl mx-auto px-6' : ''}>
-        {/* Status Bar - Above Input */}
-        {/* ================================================================ */}
-        {/* LOGIC: Show different status based on conversation state:        */}
-        {/* - waiting_permission: Show pending tool details + Accept button  */}
-        {/* - running: Show "Claude is working..." message                   */}
-        {/* - default: Show "Ready to execute" message                       */}
-        {/* ================================================================ */}
-        <div className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-t-lg px-4 py-2 flex items-center justify-between`}>
-          {/* LEFT SIDE: Status message or pending tool info */}
-          <div className="flex items-center gap-3">
-            {(() => {
-              const busyState = busyConversations.get(selectedConversation.promptId)
+      {/* Input Area - Show for existing conversations (with or without messages) */}
+      {!isNewConversation && (
+        <div className="flex-shrink-0">
+          {/* Status Bar - Above Input */}
+          {/* ================================================================ */}
+          {/* LOGIC: Show different status based on conversation state:        */}
+          {/* - waiting_permission: Show pending tool details + Accept button  */}
+          {/* - running: Show "Claude is working..." message                   */}
+          {/* - default: Show "Ready to execute" message                       */}
+          {/* ================================================================ */}
+          <div className="bg-[#2D2D2D] border-t border-gray-700 rounded-t-lg px-4 py-3 flex items-center justify-between">
+            {/* LEFT SIDE: Status message or pending tool info */}
+            <div className="flex items-center gap-3 flex-1">
+              {(() => {
+                const busyState = busyConversations.get(
+                  selectedConversation.promptId
+                )
 
-              // Show pending permission details
-              if (busyState?.status === 'waiting_permission' && busyState.pendingPermission) {
-                return (
-                  <>
-                    <span className="text-yellow-400">⚠️</span>
-                    <span className={`text-sm ${themeClasses.textPrimary}`}>
-                      <strong>{busyState.pendingPermission.toolName}</strong> is waiting for approval
+                // Show pending permission details
+                if (
+                  busyState?.status === 'waiting_permission' &&
+                  busyState.pendingPermission
+                ) {
+                  const { toolName } = busyState.pendingPermission
+                  return (
+                    <span className="text-sm text-white">
+                      {toolName} - Do you want to accept changes?
                     </span>
-                    <button
-                      className="text-xs text-blue-400 underline hover:text-blue-300 transition-colors"
-                      onClick={() => setShowToolDetails(!showToolDetails)}
-                    >
-                      {showToolDetails ? 'Hide' : 'Show'} details
-                    </button>
-                  </>
-                )
-              }
-
-              // Show running indicator
-              if (busyState?.status === 'running') {
-                return (
-                  <span className={`text-sm ${themeClasses.textSecondary}`}>
-                    Claude is working...
-                  </span>
-                )
-              }
-
-              // Default: Ready state
-              return (
-                <span className={`text-sm ${themeClasses.textSecondary}`}>
-                  Ready to execute
-                </span>
-              )
-            })()}
-          </div>
-
-          {/* RIGHT SIDE: Auto Accept toggle + Accept button */}
-          <div className="flex items-center gap-3">
-            {/* Auto Accept Toggle */}
-            <button
-              className={`relative w-14 h-7 rounded-full transition-colors ${
-                isAutoAcceptEnabled ? 'bg-green-500' : 'bg-gray-600'
-              }`}
-              onClick={() => setIsAutoAcceptEnabled(!isAutoAcceptEnabled)}
-              title={isAutoAcceptEnabled ? 'Auto-accept is ON - tools will execute immediately' : 'Auto-accept is OFF - tools will ask for permission'}
-            >
-              <span
-                className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
-                  isAutoAcceptEnabled ? 'right-1' : 'left-1'
-                }`}
-              />
-            </button>
-            <span className={`text-xs ${themeClasses.textSecondary}`}>
-              Auto Accept
-            </span>
-
-            {/* Accept Button - Only enabled when there's a pending permission */}
-            {/* LOGIC: Button is disabled unless conversation is waiting_permission */}
-            <button
-              className={`${themeClasses.btnPrimary} px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-opacity`}
-              disabled={busyConversations.get(selectedConversation.promptId)?.status !== 'waiting_permission'}
-              onClick={handleAcceptPermission}
-              title={
-                busyConversations.get(selectedConversation.promptId)?.status === 'waiting_permission'
-                  ? 'Accept this tool execution'
-                  : 'No pending tool to accept'
-              }
-            >
-              Accept
-            </button>
-          </div>
-        </div>
-
-        {/* Tool Details Expandable Section */}
-        {/* LOGIC: Only show when user clicks "Show details" and there's a pending permission */}
-        {showToolDetails &&
-         busyConversations.get(selectedConversation.promptId)?.status === 'waiting_permission' &&
-         busyConversations.get(selectedConversation.promptId)?.pendingPermission && (
-          <div className="bg-gray-800 border-l-4 border-yellow-500 p-3 mb-2 rounded">
-            <div className="text-xs text-yellow-300 font-medium mb-2">
-              Tool Input:
-            </div>
-            <pre className="text-xs text-gray-300 overflow-x-auto max-h-48 overflow-y-auto bg-gray-900 p-2 rounded">
-              {JSON.stringify(
-                busyConversations.get(selectedConversation.promptId)!.pendingPermission!.toolInput,
-                null,
-                2
-              )}
-            </pre>
-          </div>
-        )}
-
-        {/* Textarea */}
-        <div className="space-y-3">
-          <div className="relative">
-            <textarea
-              className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-none rounded-b-lg border-t-0 p-4 pl-4 pr-4 ${themeClasses.textPrimary} placeholder-gray-400 resize-none focus:outline-none ${themeClasses.borderFocus} h-32 min-h-[128px] w-full`}
-              onChange={e => {
-                setCurrentPrompt(e.target.value)
-                // Set to New Prompt when user types in a new conversation
-                if (isNewConversation && selectedConversation.promptId !== '+new') {
-                  setSelectedConversation(newConversation())
+                  )
                 }
-              }}
-              placeholder="Do something else"
-              value={currentPrompt}
-            />
 
-            {/* Left side dropdowns */}
-            <div className="absolute left-2 bottom-3 flex gap-1 pointer-events-none">
-              {/* AI Tool Dropdown */}
-              <div className="relative pointer-events-auto">
-                <button
-                  className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-medium text-gray-200 hover:border-gray-500 focus:outline-none focus:border-orange-500 min-w-[100px] flex items-center justify-between transition-all"
-                  onClick={() => {
-                    setIsAIToolDropdownOpen(!isAIToolDropdownOpen)
-                    setIsBranchDropdownOpen(false)
-                  }}
-                >
-                  <div className="flex items-center gap-1">
-                    <span className="text-orange-400">✦</span>
-                    <span className="text-xs">
-                      {selectedAITool === 'claude-code'
-                        ? 'Claude Code'
-                        : selectedAITool === 'codex'
-                          ? 'Codex'
-                          : 'Cursor'}
-                    </span>
-                  </div>
-                  <ChevronDown className="w-3 h-3 ml-1" />
-                </button>
-
-                {isAIToolDropdownOpen && (
-                  <div className="absolute bottom-full left-0 mb-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-20 min-w-[220px] max-w-sm">
-                    {/* Claude Code */}
-                    <button
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-700 first:rounded-t-lg transition-colors ${selectedAITool === 'claude-code' ? 'bg-gray-700' : ''}`}
-                      onClick={() => {
-                        setSelectedAITool('claude-code')
-                        setIsAIToolDropdownOpen(false)
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-orange-400 text-lg">✦</span>
-                        <div>
-                          <div className="text-gray-200 font-medium">
-                            Claude Code
-                          </div>
-                        </div>
-                        {selectedAITool === 'claude-code' && (
-                          <div className="ml-auto">
-                            <div className="w-2 h-2 bg-orange-400 rounded-full"></div>
-                          </div>
-                        )}
+                // Show running indicator with spinner
+                if (busyState?.status === 'running') {
+                  return (
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center space-x-1">
+                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"></div>
+                        <div
+                          className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"
+                          style={{ animationDelay: '0.1s' }}
+                        ></div>
+                        <div
+                          className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"
+                          style={{ animationDelay: '0.2s' }}
+                        ></div>
                       </div>
-                    </button>
-
-                    {/* Codex */}
-                    <button
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-700 transition-colors ${selectedAITool === 'codex' ? 'bg-gray-700' : ''}`}
-                      onClick={() => {
-                        setSelectedAITool('codex')
-                        setIsAIToolDropdownOpen(false)
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-blue-400 text-lg">✦</span>
-                        <div>
-                          <div className="text-gray-200 font-medium">
-                            Codex
-                          </div>
-                        </div>
-                        {selectedAITool === 'codex' && (
-                          <div className="ml-auto">
-                            <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-
-                    {/* Cursor */}
-                    <button
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-700 last:rounded-b-lg transition-colors ${selectedAITool === 'cursor-cli' ? 'bg-gray-700' : ''}`}
-                      onClick={() => {
-                        setSelectedAITool('cursor-cli')
-                        setIsAIToolDropdownOpen(false)
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-purple-400 text-lg">✦</span>
-                        <div>
-                          <div className="text-gray-200 font-medium">
-                            Cursor
-                          </div>
-                        </div>
-                        {selectedAITool === 'cursor-cli' && (
-                          <div className="ml-auto">
-                            <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Branch Dropdown - Only show for new conversations */}
-              {isNewConversation && (
-                <div className="relative pointer-events-auto">
-                  <button
-                    className="bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-medium text-gray-200 hover:border-gray-500 focus:outline-none focus:border-orange-500 min-w-[90px] flex items-center justify-between transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={availableBranches.length === 0}
-                    onClick={() => {
-                      setIsBranchDropdownOpen(!isBranchDropdownOpen)
-                      setIsAIToolDropdownOpen(false)
-                    }}
-                  >
-                    <div className="flex items-center gap-1">
-                      <span className="text-green-400 text-xs">🌿</span>
-                      <span className="text-xs truncate max-w-[60px]">
-                        {selectedBranch || 'No branch'}
+                      <span className="text-sm text-gray-300">
+                        Claude is working...
                       </span>
                     </div>
-                    <ChevronDown className="w-3 h-3 ml-1" />
-                  </button>
+                  )
+                }
 
-                  {isBranchDropdownOpen && availableBranches.length > 0 && (
-                    <div className="absolute bottom-full left-0 mb-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-20 min-w-[280px] max-h-48 overflow-y-auto">
-                      {getAvailableBranchesForNewPrompt().map(branch => (
-                        <button
-                          className={`w-full text-left px-4 py-3 hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg transition-colors ${branch === selectedBranch ? 'bg-gray-700' : ''}`}
-                          key={branch}
-                          onClick={() => {
-                            setSelectedBranch(branch)
-                            setSelectedWorktree(null)
-                            setIsBranchDropdownOpen(false)
-                          }}
+                // Default: Ready state
+                return (
+                  <span className="text-sm text-gray-400">
+                    Ready to execute
+                  </span>
+                )
+              })()}
+            </div>
+
+            {/* RIGHT SIDE: Auto Accept toggle + Accept button */}
+            <div className="flex items-center gap-3">
+              {/* Auto Accept Toggle */}
+              <button
+                className={`relative w-14 h-7 rounded-full transition-colors ${
+                  isAutoAcceptEnabled ? 'bg-green-500' : 'bg-gray-600'
+                }`}
+                onClick={() => setIsAutoAcceptEnabled(!isAutoAcceptEnabled)}
+                title={
+                  isAutoAcceptEnabled
+                    ? 'Auto-accept is ON - tools will execute immediately'
+                    : 'Auto-accept is OFF - tools will ask for permission'
+                }
+              >
+                <span
+                  className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                    isAutoAcceptEnabled ? 'right-1' : 'left-1'
+                  }`}
+                />
+              </button>
+              <span className="text-xs text-gray-300">Auto accept</span>
+
+              {/* Accept Button or Spinner */}
+              {busyConversations.get(selectedConversation.promptId)?.status ===
+              'waiting_permission' ? (
+                <button
+                  className="bg-white text-gray-900 hover:bg-gray-100 px-4 py-1.5 rounded text-sm font-medium transition-colors"
+                  onClick={handleAcceptPermission}
+                  title="Accept this tool execution"
+                >
+                  Accept
+                </button>
+              ) : busyConversations.get(selectedConversation.promptId)
+                  ?.status === 'running' ? (
+                <div className="flex items-center gap-2 text-gray-300 text-sm">
+                  <div className="flex items-center space-x-1">
+                    <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"></div>
+                    <div
+                      className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
+                      style={{ animationDelay: '0.1s' }}
+                    ></div>
+                    <div
+                      className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
+                      style={{ animationDelay: '0.2s' }}
+                    ></div>
+                  </div>
+                  <span>accepting...</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Textarea with integrated pill selector */}
+          <div className="space-y-3">
+            <div
+              className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-none rounded-b-lg border-t-0 ${themeClasses.borderFocus}`}
+            >
+              {/* Textarea */}
+              <div className="relative">
+                <textarea
+                  className={`w-full p-4 pb-16 ${themeClasses.textPrimary} placeholder-gray-400 resize-none focus:outline-none bg-transparent h-32 min-h-[128px]`}
+                  onChange={e => {
+                    setCurrentPrompt(e.target.value)
+                    // Set to New Prompt when user types in a new conversation
+                    if (
+                      isNewConversation &&
+                      selectedConversation.promptId !== '+new'
+                    ) {
+                      setSelectedConversation(newConversation())
+                    }
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleExecute()
+                    }
+                  }}
+                  placeholder="Do something else"
+                  value={currentPrompt}
+                />
+
+                {/* Bottom bar with pills and execute button */}
+                <div className="absolute left-0 right-0 bottom-0 px-3 pb-3 flex items-center justify-between gap-2">
+                  {/* Left side: Plus icon and selected pills */}
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {/* Plus Icon Button */}
+                    <div className="relative" ref={pillDropdownRef}>
+                      <button
+                        className={`w-8 h-8 rounded flex items-center justify-center transition-colors flex-shrink-0 ${
+                          isLightTheme
+                            ? 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                            : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+                        }`}
+                        onClick={() =>
+                          setIsPillDropdownOpen(!isPillDropdownOpen)
+                        }
+                        title="Add prompt template"
+                      >
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
                         >
-                          <div className="flex items-center gap-3">
-                            <span className="text-green-400">🌿</span>
-                            <div className="text-gray-200 font-medium">
-                              {branch}
-                            </div>
-                            {branch === selectedBranch && (
-                              <div className="ml-auto">
-                                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                          <path
+                            d="M12 4v16m8-8H4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                          />
+                        </svg>
+                      </button>
+
+                      {/* Dropdown with Typeahead - Opens Upward */}
+                      {isPillDropdownOpen && (
+                        <div
+                          className={`absolute bottom-full left-0 mb-2 rounded-lg shadow-xl z-50 w-80 ${
+                            isLightTheme
+                              ? 'bg-white border border-gray-200'
+                              : 'bg-gray-800 border border-gray-700'
+                          }`}
+                        >
+                          {/* Filtered Pills List */}
+                          <div className="max-h-64 overflow-y-auto">
+                            {getFilteredPills().length > 0 ? (
+                              getFilteredPills().map((pill, index) => {
+                                const isSelected = selectedPills.some(
+                                  p => p.label === pill.label
+                                )
+                                return (
+                                  <button
+                                    className={`w-full text-left px-4 py-3 transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                                      isSelected
+                                        ? isLightTheme
+                                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        : isLightTheme
+                                          ? 'hover:bg-gray-50 text-gray-900'
+                                          : 'hover:bg-gray-700 text-gray-200'
+                                    }`}
+                                    disabled={isSelected}
+                                    key={index}
+                                    onClick={() =>
+                                      !isSelected && handleAddPill(pill)
+                                    }
+                                  >
+                                    <div className="font-medium text-sm">
+                                      {pill.label}
+                                    </div>
+                                    <div
+                                      className={`text-xs mt-1 ${
+                                        isLightTheme
+                                          ? 'text-gray-500'
+                                          : 'text-gray-400'
+                                      }`}
+                                    >
+                                      {pill.text.substring(0, 60)}...
+                                    </div>
+                                  </button>
+                                )
+                              })
+                            ) : (
+                              <div
+                                className={`px-4 py-8 text-center text-sm ${
+                                  isLightTheme
+                                    ? 'text-gray-500'
+                                    : 'text-gray-400'
+                                }`}
+                              >
+                                No templates found
                               </div>
                             )}
                           </div>
-                        </button>
+
+                          {/* Search Input at Bottom */}
+                          <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+                            <input
+                              autoFocus
+                              className={`w-full px-3 py-2 rounded-md text-sm outline-none ${
+                                isLightTheme
+                                  ? 'bg-gray-50 border border-gray-300 text-gray-900 placeholder-gray-400'
+                                  : 'bg-gray-700 border border-gray-600 text-white placeholder-gray-500'
+                              }`}
+                              onChange={e => setPillSearchText(e.target.value)}
+                              placeholder="Search templates..."
+                              type="text"
+                              value={pillSearchText}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Selected Pills on the Right */}
+                    <div className="flex flex-wrap gap-2 flex-1 min-w-0 overflow-x-auto">
+                      {selectedPills.map((pill, index) => (
+                        <div
+                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs border flex-shrink-0 ${
+                            isLightTheme
+                              ? 'bg-white border-gray-300 text-gray-700'
+                              : 'bg-gray-800 border-gray-600 text-gray-200'
+                          }`}
+                          key={index}
+                        >
+                          <span className="truncate max-w-[150px]">
+                            {pill.label}
+                          </span>
+                          <button
+                            className={`hover:opacity-70 transition-opacity ${
+                              isLightTheme ? 'text-gray-500' : 'text-gray-400'
+                            }`}
+                            onClick={() => handleRemovePill(pill.label)}
+                            title="Remove"
+                          >
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                d="M6 18L18 6M6 6l12 12"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
+                  </div>
 
-            {/* Right side buttons */}
-            <div className="absolute right-2 bottom-3 flex gap-1 pointer-events-none">
-              {/* Allow pointer events only on buttons */}
-              <button
-                className={`${themeClasses.btnSecondary} disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1.5 pointer-events-auto`}
-                disabled={
-                  !projectContext ||
-                  !currentPrompt.trim() ||
-                  (isNewConversation && !selectedBranch) ||
-                  busyConversations.get(selectedConversation.promptId)?.status === 'running'
-                }
-                onClick={handleExecute}
-                title={
-                  !projectContext
-                    ? 'Please select a project first'
-                    : !currentPrompt.trim()
-                      ? 'Please enter a prompt'
-                      : isNewConversation && !selectedBranch
-                        ? 'Please select a branch'
-                        : busyConversations.get(selectedConversation.promptId)?.status === 'running'
-                          ? 'This conversation is currently executing'
-                          : isNewConversation
-                            ? 'Create new conversation and execute'
-                            : 'Execute the prompt'
-                }
-              >
-                <Play className="w-3 h-3" />
-                <span className="text-xs">
-                  {busyConversations.get(selectedConversation.promptId)?.status === 'running'
-                    ? 'Executing...'
-                    : 'Execute'}
-                </span>
-              </button>
-
-
-            </div>
-          </div>
-        </div>
-
-        {/* Prompt Pills - Below Input */}
-        <div className="mt-3">
-          <div className="flex flex-wrap gap-2">
-            {promptPills.map((pill, index) => {
-              const isActive = activePills.has(index)
-              return (
-                <button
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border ${
-                    isActive
-                      ? themeClasses.pillActive
-                      : themeClasses.pillInactive
-                  }`}
-                  disabled={false}
-                  key={index}
-                  onClick={() => handlePillClick(index, pill.text)}
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full transition-colors ${
-                      isActive
-                        ? themeClasses.pillActiveDot
-                        : themeClasses.pillInactiveDot
+                  {/* Right side: Execute button */}
+                  <button
+                    className={`disabled:opacity-50 disabled:cursor-not-allowed p-2 rounded transition-colors flex items-center justify-center flex-shrink-0 ${
+                      busyConversations.get(selectedConversation.promptId)
+                        ?.status === 'running'
+                        ? isLightTheme
+                          ? 'bg-gray-400'
+                          : 'bg-gray-600'
+                        : isLightTheme
+                          ? 'bg-black hover:bg-gray-800'
+                          : 'bg-white hover:bg-gray-200'
                     }`}
-                  ></span>
-                  {pill.label}
-                </button>
-              )
-            })}
+                    disabled={
+                      !projectContext ||
+                      !currentPrompt.trim() ||
+                      (isNewConversation && !selectedBranch) ||
+                      busyConversations.get(selectedConversation.promptId)
+                        ?.status === 'running'
+                    }
+                    onClick={handleExecute}
+                    title={
+                      !projectContext
+                        ? 'Please select a project first'
+                        : !currentPrompt.trim()
+                          ? 'Please enter a prompt'
+                          : isNewConversation && !selectedBranch
+                            ? 'Please select a branch'
+                            : busyConversations.get(
+                                  selectedConversation.promptId
+                                )?.status === 'running'
+                              ? 'This conversation is currently executing'
+                              : isNewConversation
+                                ? 'Create new conversation and execute'
+                                : 'Execute the prompt'
+                    }
+                  >
+                    <ArrowUp
+                      className={`w-4 h-4 ${
+                        busyConversations.get(selectedConversation.promptId)
+                          ?.status === 'running'
+                          ? isLightTheme
+                            ? 'text-white'
+                            : 'text-gray-300'
+                          : isLightTheme
+                            ? 'text-white'
+                            : 'text-black'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Status Messages */}
-        {!projectContext && (
-          <div className="mt-3 text-sm text-yellow-400 bg-yellow-900/20 p-3 rounded-lg">
-            ⚠️ No project selected. Please go to the main screen to select a
-            project folder and root branch.
-          </div>
-        )}
-      </div>
+          {/* Status Messages */}
+          {!projectContext && (
+            <div className="mt-3 text-sm text-yellow-400 bg-yellow-900/20 p-3 rounded-lg">
+              ⚠️ No project selected. Please go to the main screen to select a
+              project folder and root branch.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
