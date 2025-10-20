@@ -15,7 +15,7 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
   const [editingAgent, setEditingAgent] = useState<PromptAgent | null>(null)
 
   return (
-    <div className="space-y-4">
+    <div className="h-full overflow-y-auto space-y-4 pr-2">
       {agents.map(agent => (
         <div
           className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-6`}

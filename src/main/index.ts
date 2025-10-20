@@ -19,9 +19,6 @@ import {
 import { homedir } from 'node:os'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createHash } from 'node:crypto'
-import * as pty from 'node-pty'
-import stripAnsi from 'strip-ansi'
 
 import { makeAppWithSingleInstanceLock } from 'lib/electron-app/factories/app/instance'
 import { makeAppSetup } from 'lib/electron-app/factories/app/setup'

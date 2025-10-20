@@ -134,19 +134,37 @@ export function Prompts({ projectContext }: PromptsProps) {
   const [agents, setAgents] = useState<PromptAgent[]>([
     {
       id: '1',
-      name: 'Code Assistant',
+      name: 'Code Planner',
       systemPrompt:
-        'You are an expert code assistant. Help users write clean, efficient code.',
-      tools: ['Read', 'Write', 'Edit', 'Bash'],
+        'Can you tell me 2-3 plans to implement this feautre, go through the code properly and try and reuse existing code instead of giving me new code. Be concise and direct with your plan and recommend me the best plan to implement.',
+      tools: ['Read', 'Glob', 'Grep', 'Task'],
       createdAt: new Date(),
       updatedAt: new Date(),
     },
     {
       id: '2',
-      name: 'Bug Fixer',
+      name: 'Expert Frontend Developer',
       systemPrompt:
-        'You are a debugging expert. Help users identify and fix bugs in their code.',
-      tools: ['Read', 'Grep', 'Bash', 'Edit'],
+        'You are an expert frontend developer with lot of experience, please ensure that that the brand colors #FFFFFF, #151312, #66645F, #B0B0AB, #D2D2D0, #DEDEDB, #000000 are being used for this feature. Ensure you reuse components whereever possible.',
+      tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: '3',
+      name: 'Backend Architect',
+      systemPrompt:
+        'You are an expert backend architect which can devise a database design along with backend architechture using the right recommended tools.',
+      tools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: '4',
+      name: 'Bug Fix',
+      systemPrompt:
+        'I have a bug that needs fixing. Run the bash terminal with the command pnpm run dev and look at the logs to find the error mentioned. Find the source of the big and fix it.',
+      tools: ['Read', 'Edit', 'Bash', 'Grep', 'Glob'],
       createdAt: new Date(),
       updatedAt: new Date(),
     },
