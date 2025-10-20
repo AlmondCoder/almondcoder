@@ -84,10 +84,10 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
                     'TodoWrite',
                   ].map(tool => (
                     <button
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border-2 ${
                         editingAgent?.tools.includes(tool)
-                          ? 'bg-purple-600 text-white border-2 border-purple-400'
-                          : 'bg-gray-700 text-gray-300 border-2 border-transparent hover:border-gray-500'
+                          ? `${themeClasses.interactivePrimaryBg} ${themeClasses.interactivePrimaryText} ${themeClasses.borderFocus}`
+                          : `${themeClasses.bgSecondary} ${themeClasses.textSecondary} border-transparent ${themeClasses.borderHover}`
                       }`}
                       key={tool}
                       onClick={() => {
@@ -116,7 +116,7 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
                   Cancel
                 </button>
                 <button
-                  className={`px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium ${themeClasses.interactivePrimaryBg} hover:${themeClasses.interactivePrimaryBgHover} ${themeClasses.interactivePrimaryText} transition-colors`}
                   onClick={() => {
                     if (editingAgent) {
                       setAgents(
@@ -150,7 +150,7 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
                   </p>
                 </div>
                 <button
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors`}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${themeClasses.interactivePrimaryBg} hover:${themeClasses.interactivePrimaryBgHover} ${themeClasses.interactivePrimaryText} transition-colors`}
                   onClick={() => {
                     setEditingAgentId(agent.id)
                     setEditingAgent({ ...agent })
@@ -184,7 +184,7 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
                 <div className="flex flex-wrap gap-2">
                   {agent.tools.map(tool => (
                     <span
-                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600/20 text-purple-300 border border-purple-500/30"
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${themeClasses.interactivePrimaryBg} bg-opacity-20 ${themeClasses.textAccent} border ${themeClasses.borderFocus} border-opacity-30`}
                       key={tool}
                     >
                       {tool}

@@ -438,13 +438,32 @@ export const createThemeClasses = (theme: ColorPalette) => ({
   textError: 'text-[var(--color-status-error)]',
   textInfo: 'text-[var(--color-status-info)]',
 
-  // Interactive button classes
+  // Interactive button classes (combined)
   btnPrimary:
     'bg-[var(--color-interactive-primary-bg)] hover:bg-[var(--color-interactive-primary-bg-hover)] text-[var(--color-interactive-primary-text)] border-[var(--color-interactive-primary-border)] hover:border-[var(--color-interactive-primary-border-hover)]',
   btnSecondary:
     'bg-[var(--color-interactive-secondary-bg)] hover:bg-[var(--color-interactive-secondary-bg-hover)] text-[var(--color-interactive-secondary-text)] border-[var(--color-interactive-secondary-border)] hover:border-[var(--color-interactive-secondary-border-hover)]',
   btnAccent:
     'bg-[var(--color-interactive-accent-bg)] hover:bg-[var(--color-interactive-accent-bg-hover)] text-[var(--color-interactive-accent-text)] border-[var(--color-interactive-accent-border)] hover:border-[var(--color-interactive-accent-border-hover)]',
+
+  // Interactive classes (granular)
+  interactivePrimaryBg: 'bg-[var(--color-interactive-primary-bg)]',
+  interactivePrimaryBgHover: 'bg-[var(--color-interactive-primary-bg-hover)]',
+  interactivePrimaryText: 'text-[var(--color-interactive-primary-text)]',
+  interactivePrimaryBorder: 'border-[var(--color-interactive-primary-border)]',
+  interactivePrimaryBorderHover: 'border-[var(--color-interactive-primary-border-hover)]',
+
+  interactiveSecondaryBg: 'bg-[var(--color-interactive-secondary-bg)]',
+  interactiveSecondaryBgHover: 'bg-[var(--color-interactive-secondary-bg-hover)]',
+  interactiveSecondaryText: 'text-[var(--color-interactive-secondary-text)]',
+  interactiveSecondaryBorder: 'border-[var(--color-interactive-secondary-border)]',
+  interactiveSecondaryBorderHover: 'border-[var(--color-interactive-secondary-border-hover)]',
+
+  interactiveAccentBg: 'bg-[var(--color-interactive-accent-bg)]',
+  interactiveAccentBgHover: 'bg-[var(--color-interactive-accent-bg-hover)]',
+  interactiveAccentText: 'text-[var(--color-interactive-accent-text)]',
+  interactiveAccentBorder: 'border-[var(--color-interactive-accent-border)]',
+  interactiveAccentBorderHover: 'border-[var(--color-interactive-accent-border-hover)]',
 
   // Chat classes
   chatUser: 'bg-[var(--color-chat-user-bg)] text-[var(--color-chat-user-text)]',
