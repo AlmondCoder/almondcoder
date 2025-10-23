@@ -28,6 +28,7 @@ export interface ConversationMessage {
 }
 
 export interface ConversationHistory {
+  messages?: any
   promptId: string
   projectPath: string
   worktreePath: string
@@ -150,4 +151,27 @@ export interface ToolPermissionResponse {
   requestId: string // Must match the request ID
   allowed: boolean // true = accept, false = cancel
   newPrompt?: string // If cancelling, the new prompt user typed
+}
+
+// ============================================================================
+// Todo System Types
+// ============================================================================
+// These types support the TodoWrite tool that tracks task progress in conversations
+
+export type TodoStatus = 'pending' | 'in_progress' | 'completed'
+
+/**
+ * Represents a single todo item in a conversation
+ */
+export interface TodoItem {
+  content: string // The task description (imperative form, e.g., "Run tests")
+  activeForm: string // Present continuous form (e.g., "Running tests")
+  status: TodoStatus // Current status of the task
+}
+
+/**
+ * Represents the complete todo list from a TodoWrite tool call
+ */
+export interface TodoList {
+  todos: TodoItem[]
 }

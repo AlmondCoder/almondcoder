@@ -6,7 +6,9 @@ import {
   Plus,
   Grid3x3,
   Brain,
-  Info
+  Info,
+  Terminal,
+  Keyboard
 } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import { AgentView } from './AgentView'
@@ -143,7 +145,7 @@ export function Prompts({ projectContext }: PromptsProps) {
     },
     {
       id: '2',
-      name: 'Expert Frontend Developer',
+      name: 'Brand Mantainer',
       systemPrompt:
         'You are an expert frontend developer with lot of experience, please ensure that that the brand colors #FFFFFF, #151312, #66645F, #B0B0AB, #D2D2D0, #DEDEDB, #000000 are being used for this feature. Ensure you reuse components whereever possible.',
       tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
@@ -235,8 +237,8 @@ export function Prompts({ projectContext }: PromptsProps) {
     )
     if (selectedPrompt && selectedPrompt.prompt) {
       return (
-        selectedPrompt.prompt.substring(0, 15) +
-        (selectedPrompt.prompt.length > 15 ? '...' : '')
+        selectedPrompt.prompt.substring(0, 80) +
+        (selectedPrompt.prompt.length > 80 ? '...' : '')
       )
     }
     return 'Selected Prompt'
@@ -245,7 +247,7 @@ export function Prompts({ projectContext }: PromptsProps) {
   // Get the branch name for the selected conversation
   const getBranchName = (): string => {
     if (selectedConversation.promptId === '+new') {
-      return projectContext?.selectedBranch || ''
+      return '' // Don't show branch in top bar for new conversations
     }
     const selectedPrompt = promptHistory.find(
       p => p.id === selectedConversation.promptId
@@ -441,14 +443,15 @@ export function Prompts({ projectContext }: PromptsProps) {
             <button
               className={`${selectedConversation.promptId === prompt.id && viewMode === 'prompts' ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${selectedConversation.promptId === prompt.id && viewMode === 'prompts' ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors w-full text-left`}
               key={prompt.id}
-              onClick={() => {
+              onClick={async () => {
                 console.log('Selected prompt:', prompt.id)
                 setViewMode('prompts')
 
                 // Extract project name from projectPath (e.g., /Users/user/almondcoder/test_git -> test_git)
                 const projectName =
                   prompt.projectPath.split('/').pop() || 'unknown'
-                const conversationLogPath = `/Users/user/.almondcoder/${projectName}/prompts/conversations/${prompt.id}.json`
+                const appDataPath = await window.App.getAppDataPath()
+                const conversationLogPath = `${appDataPath}/${projectName}/prompts/conversations/${prompt.id}.json`
 
                 setSelectedConversation({
                   promptId: prompt.id,
@@ -468,12 +471,12 @@ export function Prompts({ projectContext }: PromptsProps) {
                 />
 
                 <div className="flex-1 min-w-0">
-                  {/* Prompt Text - Truncated to 40 chars */}
+                  {/* Prompt Text - Truncated to 60 chars */}
                   <div
                     className={`text-sm font-medium ${themeClasses.textPrimary} truncate`}
                   >
-                    {prompt.prompt.length > 40
-                      ? `${prompt.prompt.substring(0, 40)}...`
+                    {prompt.prompt.length > 60
+                      ? `${prompt.prompt.substring(0, 60)}...`
                       : prompt.prompt}
                   </div>
 
@@ -522,7 +525,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                   <div
                     className={`flex items-center gap-1 px-2 py-1 rounded ${themeClasses.bgSecondary} border ${themeClasses.borderPrimary}`}
                   >
-                    <GitBranch className="w-3 h-3 text-green-400" />
+                    <GitBranch className="w-3 h-3" />
                     <span className={`text-xs ${themeClasses.textSecondary}`}>
                       {getBranchName()}
                     </span>
@@ -534,32 +537,89 @@ export function Prompts({ projectContext }: PromptsProps) {
 
           {/* Right side - Simple toolbar (only show for prompts view) */}
           {viewMode === 'prompts' && (
-            <div className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}>
-              <button
-                className={`px-4 py-1.5 text-sm transition-colors flex items-center gap-2 ${
-                  conversationViewMode === 'conversation'
-                    ? `${isLightTheme ? 'bg-gray-100 text-gray-900' : 'bg-gray-700 text-white'}`
-                    : `${isLightTheme ? 'bg-white text-gray-600 hover:bg-gray-50' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`
-                }`}
-                onClick={() => setConversationViewMode('conversation')}
-                title="Conversation View"
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>Chat</span>
-              </button>
-              <div className={`w-px h-6 ${themeClasses.borderPrimary} bg-gray-300 dark:bg-gray-600`} />
-              <button
-                className={`px-4 py-1.5 text-sm transition-colors flex items-center gap-2 ${
-                  conversationViewMode === 'diff'
-                    ? `${isLightTheme ? 'bg-gray-100 text-gray-900' : 'bg-gray-700 text-white'}`
-                    : `${isLightTheme ? 'bg-white text-gray-600 hover:bg-gray-50' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`
-                }`}
-                onClick={() => setConversationViewMode('diff')}
-                title="Code Difference View"
-              >
-                <GitCompare className="w-4 h-4" />
-                <span>Diff</span>
-              </button>
+            <div className="flex items-center gap-[10px]">
+              {/* Terminal and Keyboard group */}
+              <div className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}>
+                <button
+                  className="p-2 text-sm transition-colors flex items-center justify-center"
+                  style={{
+                    backgroundColor: selectedConversation.worktreePath
+                      ? theme.background.tertiary
+                      : theme.background.tertiary,
+                    color: selectedConversation.worktreePath
+                      ? theme.text.primary
+                      : theme.text.muted,
+                    cursor: selectedConversation.worktreePath ? 'pointer' : 'not-allowed',
+                    opacity: selectedConversation.worktreePath ? 1 : 0.6,
+                  }}
+                  title={selectedConversation.worktreePath ? "Open Terminal at Worktree" : "No worktree available"}
+                  onClick={async () => {
+                    if (selectedConversation.worktreePath) {
+                      const result = await window.App.openTerminalAtPath(
+                        selectedConversation.worktreePath
+                      )
+                      if (!result.success) {
+                        console.error('Failed to open terminal:', result.error)
+                      }
+                    }
+                  }}
+                  disabled={!selectedConversation.worktreePath}
+                >
+                  <Terminal className="w-4 h-4" />
+                </button>
+                <div
+                  className="w-px h-6"
+                  style={{ backgroundColor: theme.border.primary }}
+                />
+                <button
+                  className="p-2 text-sm transition-colors flex items-center justify-center"
+                  style={{
+                    backgroundColor: theme.background.tertiary,
+                    color: theme.text.primary,
+                  }}
+                  title="Keyboard Shortcuts"
+                >
+                  <Keyboard className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Conversation and Diff group */}
+              <div className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}>
+                <button
+                  className="p-2 text-sm transition-colors flex items-center justify-center"
+                  style={{
+                    backgroundColor: conversationViewMode === 'conversation'
+                      ? theme.background.tertiary
+                      : theme.background.primary,
+                    color: conversationViewMode === 'conversation'
+                      ? theme.text.primary
+                      : theme.text.tertiary,
+                  }}
+                  onClick={() => setConversationViewMode('conversation')}
+                  title="Conversation View"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                </button>
+                <div
+                  className="w-px h-6"
+                  style={{ backgroundColor: theme.border.primary }}
+                />
+                <button
+                  className="p-2 text-sm transition-colors flex items-center justify-center"
+                  style={{
+                    backgroundColor: conversationViewMode === 'diff'
+                      ? theme.background.tertiary
+                      : theme.background.primary,
+                    color: conversationViewMode === 'diff'
+                      ? theme.text.primary
+                      : theme.text.tertiary,
+                  }}
+                  onClick={() => setConversationViewMode('diff')}
+                  title="Code Difference View"
+                >
+                  <GitCompare className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           )}
         </div>

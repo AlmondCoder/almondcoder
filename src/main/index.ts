@@ -582,6 +582,10 @@ ipcMain.handle('get-recent-projects', () => {
   return loadRecentProjects()
 })
 
+ipcMain.handle('get-app-data-path', () => {
+  return join(homedir(), '.almondcoder')
+})
+
 ipcMain.handle('add-recent-project', (event, project) => {
   const projects = loadRecentProjects()
 
@@ -961,16 +965,7 @@ ipcMain.handle('get-git-diff', async (event, path) => {
 
 ipcMain.handle('clone-repository', async (event, repoUrl) => {
   try {
-    // Check if this might be a private repository
-    const isLikelyPrivateRepo = (url: string): boolean => {
-      // Private repos typically require authentication
-      // This is a heuristic check - we'll let git tell us if it needs credentials
-      return (
-        url.includes('github.com') ||
-        url.includes('gitlab.com') ||
-        url.includes('bitbucket.org')
-      )
-    }
+   
 
     // First, let user select destination folder
     const result = await dialog.showOpenDialog({
@@ -1016,7 +1011,7 @@ ipcMain.handle('clone-repository', async (event, repoUrl) => {
       errorMessage.includes('object null is not iterable')
     ) {
       throw new Error(
-        'Only public repositories are allowed. Private repositories require authentication which is not supported.'
+        'Please configure GIT SSH to download private repositories.'
       )
     }
 
@@ -1472,6 +1467,219 @@ ipcMain.handle('get-project-worktrees', async (event, projectPath) => {
       success: false,
       error: error.message,
       worktrees: [],
+    }
+  }
+})
+
+// Helper function to detect default terminal on macOS
+async function getMacOSDefaultTerminal(): Promise<string | null> {
+  // Check for popular terminal apps in order of preference
+  const terminals = [
+    { name: 'iTerm', app: 'iTerm' },
+    { name: 'Warp', app: 'Warp' },
+    { name: 'Alacritty', app: 'Alacritty' },
+    { name: 'Kitty', app: 'kitty' },
+    { name: 'Hyper', app: 'Hyper' },
+    { name: 'Terminal', app: 'Terminal' }, // Default macOS terminal
+  ]
+
+  for (const terminal of terminals) {
+    try {
+      // Check if the application exists
+      await execAsync(`osascript -e 'exists application "${terminal.app}"'`)
+      return terminal.app
+    } catch {
+      continue
+    }
+  }
+
+  return 'Terminal' // Fallback to default Terminal.app
+}
+
+// Helper function to open macOS terminal at path
+async function openMacOSTerminal(terminalApp: string, path: string) {
+  const escapedPath = path.replace(/"/g, '\\"')
+
+  if (terminalApp === 'iTerm') {
+    // iTerm2 specific AppleScript
+    const script = `tell application "iTerm"
+      activate
+      create window with default profile
+      tell current session of current window
+        write text "cd \\"${escapedPath}\\""
+      end tell
+    end tell`
+    await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`)
+  } else if (terminalApp === 'Alacritty') {
+    // Alacritty uses command line flags
+    await execAsync(`open -a Alacritty --args --working-directory "${path}"`)
+  } else if (terminalApp === 'Kitty' || terminalApp === 'kitty') {
+    // Kitty uses command line flags
+    await execAsync(`open -a kitty --args --directory="${path}"`)
+  } else if (terminalApp === 'Warp') {
+    // Warp can be opened with the path
+    await execAsync(`open -a Warp "${path}"`)
+  } else {
+    // Default Terminal.app and other terminals
+    const script = `tell application "${terminalApp}"
+      activate
+      do script "cd \\"${escapedPath}\\""
+    end tell`
+    await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`)
+  }
+}
+
+// Helper function to detect default terminal on Windows
+async function getWindowsDefaultTerminal(): Promise<string> {
+  // Check for Windows Terminal first (modern default)
+  try {
+    await execAsync('where wt.exe')
+    return 'wt'
+  } catch {
+    // Check for PowerShell
+    try {
+      await execAsync('where pwsh.exe')
+      return 'pwsh'
+    } catch {
+      // Check for Windows PowerShell
+      try {
+        await execAsync('where powershell.exe')
+        return 'powershell'
+      } catch {
+        // Fallback to cmd.exe
+        return 'cmd'
+      }
+    }
+  }
+}
+
+// Helper function to open Windows terminal at path
+async function openWindowsTerminal(terminal: string, path: string) {
+  if (terminal === 'wt') {
+    // Windows Terminal
+    await execAsync(`wt.exe -d "${path}"`)
+  } else if (terminal === 'pwsh') {
+    // PowerShell Core
+    await execAsync(`start pwsh.exe -NoExit -Command "Set-Location '${path}'"`)
+  } else if (terminal === 'powershell') {
+    // Windows PowerShell
+    await execAsync(`start powershell.exe -NoExit -Command "Set-Location '${path}'"`)
+  } else {
+    // cmd.exe
+    await execAsync(`start cmd.exe /K "cd /d ${path}"`)
+  }
+}
+
+// Helper function to detect default terminal on Linux
+async function getLinuxDefaultTerminal(): Promise<string | null> {
+  // Check TERMINAL environment variable first
+  if (process.env.TERMINAL) {
+    return process.env.TERMINAL
+  }
+
+  // Check for x-terminal-emulator (Debian/Ubuntu default)
+  try {
+    await execAsync('which x-terminal-emulator 2>/dev/null')
+    return 'x-terminal-emulator'
+  } catch {
+    // Continue to other checks
+  }
+
+  // Try to get default from xdg-mime
+  try {
+    const { stdout } = await execAsync('xdg-mime query default x-scheme-handler/terminal 2>/dev/null')
+    if (stdout.trim()) {
+      // Extract terminal name from .desktop file
+      const desktopFile = stdout.trim()
+      const terminalName = desktopFile.replace('.desktop', '')
+      return terminalName
+    }
+  } catch {
+    // Continue to fallback
+  }
+
+  // Try common terminals in order of popularity
+  const terminals = [
+    'gnome-terminal',
+    'konsole',
+    'xfce4-terminal',
+    'alacritty',
+    'kitty',
+    'terminator',
+    'tilix',
+    'xterm',
+  ]
+
+  for (const terminal of terminals) {
+    try {
+      await execAsync(`which ${terminal} 2>/dev/null`)
+      return terminal
+    } catch {
+      continue
+    }
+  }
+
+  return null
+}
+
+// Helper function to open Linux terminal at path
+async function openLinuxTerminal(terminal: string, path: string) {
+  // Handle specific terminals with their working directory flags
+  if (terminal === 'gnome-terminal') {
+    await execAsync(`gnome-terminal --working-directory="${path}"`)
+  } else if (terminal === 'konsole') {
+    await execAsync(`konsole --workdir "${path}"`)
+  } else if (terminal === 'xfce4-terminal') {
+    await execAsync(`xfce4-terminal --working-directory="${path}"`)
+  } else if (terminal === 'alacritty') {
+    await execAsync(`alacritty --working-directory "${path}"`)
+  } else if (terminal === 'kitty') {
+    await execAsync(`kitty --directory="${path}"`)
+  } else if (terminal === 'terminator') {
+    await execAsync(`terminator --working-directory="${path}"`)
+  } else if (terminal === 'tilix') {
+    await execAsync(`tilix --working-directory="${path}"`)
+  } else if (terminal === 'x-terminal-emulator') {
+    await execAsync(`x-terminal-emulator --working-directory="${path}"`)
+  } else {
+    // Generic fallback - execute shell command to cd
+    await execAsync(`${terminal} -e "cd '${path}' && $SHELL"`)
+  }
+}
+
+// Open system terminal at a specific path using user's default terminal
+ipcMain.handle('open-terminal-at-path', async (event, path) => {
+  try {
+    const platform = process.platform
+
+    if (platform === 'darwin') {
+      // macOS: Detect and use default terminal
+      const terminal = await getMacOSDefaultTerminal()
+      if (terminal) {
+        await openMacOSTerminal(terminal, path)
+      } else {
+        throw new Error('No terminal application found')
+      }
+    } else if (platform === 'win32') {
+      // Windows: Detect and use default terminal
+      const terminal = await getWindowsDefaultTerminal()
+      await openWindowsTerminal(terminal, path)
+    } else {
+      // Linux: Detect and use default terminal
+      const terminal = await getLinuxDefaultTerminal()
+      if (terminal) {
+        await openLinuxTerminal(terminal, path)
+      } else {
+        throw new Error('No supported terminal emulator found')
+      }
+    }
+
+    return { success: true }
+  } catch (error: any) {
+    console.error('Error opening terminal:', error)
+    return {
+      success: false,
+      error: error.message,
     }
   }
 })

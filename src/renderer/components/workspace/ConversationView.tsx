@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { v4 as uuidv4 } from 'uuid'
 import {
   ClipboardList,
   Play,
@@ -15,15 +16,20 @@ import {
   Notebook,
   Zap,
   XCircle,
-  Wrench
+  Wrench,
+  Plus,
+  X
 } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
+import { PromptInput } from './PromptInput'
 import type {
   ConversationHistory,
   EnhancedPromptHistoryItem,
   PendingPermission,
   ToolPermissionRequest,
   BusyConversation,
+  TodoItem,
+  TodoList,
 } from '../../../shared/types'
 import { playNotificationSound } from '../../utils/notificationSound'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -168,24 +174,15 @@ export function ConversationView({
   const themeClasses = createThemeClasses(theme)
   const isLightTheme = themeName === 'light'
 
-  const [currentPrompt, setCurrentPrompt] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [activePills, setActivePills] = useState<Set<number>>(new Set())
-  const [selectedPills, setSelectedPills] = useState<
-    Array<{ label: string; text: string }>
-  >([])
-  const [isPillDropdownOpen, setIsPillDropdownOpen] = useState(false)
-  const [pillSearchText, setPillSearchText] = useState('')
 
   const [selectedBranch, setSelectedBranch] = useState<string>('')
   const [selectedWorktree, setSelectedWorktree] = useState<string | null>(null)
-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false)
   const [isAutoAcceptEnabled, setIsAutoAcceptEnabled] = useState(false)
 
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null)
   const selectedConversationRef = useRef(selectedConversation)
-  const pillDropdownRef = useRef<HTMLDivElement>(null)
 
   const isNewConversation = selectedConversation.promptId === '+new'
 
@@ -201,46 +198,22 @@ export function ConversationView({
     }
   }, [selectedConversation.promptId, chatMessages.length])
 
-  // Close pill dropdown when clicking outside
+  // Set default branch for new conversations
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        pillDropdownRef.current &&
-        !pillDropdownRef.current.contains(event.target as Node)
-      ) {
-        setIsPillDropdownOpen(false)
-        setPillSearchText('')
-      }
+    if (isNewConversation && !selectedBranch && availableBranches.length > 0) {
+      const defaultBranch = availableBranches[0]
+      setSelectedBranch(defaultBranch)
+      console.log('Set default branch for new conversation:', defaultBranch)
     }
+  }, [isNewConversation, selectedBranch, availableBranches])
 
-    if (isPillDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
+  // Reset selected branch when switching to a new conversation
+  useEffect(() => {
+    if (isNewConversation) {
+      setSelectedBranch('')
+      console.log('Reset branch selection for new conversation')
     }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isPillDropdownOpen])
-
-  // Prompt pills data
-  const promptPills = [
-    {
-      label: 'Code Planner',
-      text: 'Can you tell me 2-3 plans to implement this feautre, go through the code properly and try and reuse existing code instead of giving me new code. Be concise and direct with your plan and recommend me the best plan to implement.',
-    },
-    {
-      label: 'Expert Frontend Developer',
-      text: 'You are an expert frontend developer with lot of experience, please ensure that that the brand colors #FFFFFF, #151312, #66645F, #B0B0AB, #D2D2D0, #DEDEDB, #000000 are being used for this feature. Ensure you reuse components whereever possible.',
-    },
-    {
-      label: 'Backend Architect',
-      text: 'You are an expert backend architect which can devise a database design along with backend architechture using the right recommended tools.',
-    },
-    {
-      label: 'Bug Fix',
-      text: 'I have a bug that needs fixing. Run the bash terminal with the command pnpm run dev and look at the logs to find the error mentioned. Find the source of the big and fix it.',
-    },
-  ]
+  }, [selectedConversation.promptId, isNewConversation])
 
   // Load conversation messages from the conversation log file (for existing conversations)
   useEffect(() => {
@@ -262,9 +235,15 @@ export function ConversationView({
           }
 
           const messages: ChatMessage[] = []
+          let lastSessionId: string | undefined = undefined
 
           fileContent.forEach((entry: any, index: number) => {
             const { timestamp, data, from } = entry
+
+            // Capture session_id from any message that has it
+            if (data.content?.session_id) {
+              lastSessionId = data.content.session_id
+            }
 
             // 1. Handle user prompt messages (from: "user")
             if (
@@ -384,6 +363,15 @@ export function ConversationView({
           })
 
           setChatMessages(messages)
+
+          // Update selectedConversation with captured session ID
+          if (lastSessionId && lastSessionId !== selectedConversation.aiSessionId) {
+            console.log('🔑 Loaded session ID from conversation file:', lastSessionId)
+            setSelectedConversation({
+              ...selectedConversation,
+              aiSessionId: lastSessionId
+            })
+          }
         } catch (error) {
           console.error('Error loading conversation messages:', error)
           setChatMessages([])
@@ -521,76 +509,6 @@ export function ConversationView({
     }
   }, []) // ✅ Empty dependency array - listeners registered once on mount
 
-  const handlePillClick = (index: number, text: string) => {
-    const newActivePills = new Set(activePills)
-
-    if (activePills.has(index)) {
-      newActivePills.delete(index)
-      setCurrentPrompt(prev => {
-        return prev.replace(text, '').replace(/\s+/g, ' ').trim()
-      })
-    } else {
-      // Add pill: append its text to current prompt
-      newActivePills.add(index)
-      setCurrentPrompt(prev => {
-        if (prev.trim()) {
-          // If there's already text, append with a space
-          return prev + (prev.endsWith(' ') ? '' : ' ') + text
-        }
-        // If empty, set the text directly
-        return text
-      })
-    }
-
-    setActivePills(newActivePills)
-  }
-
-  // New pill system handlers
-  const handleAddPill = (pill: { label: string; text: string }) => {
-    // Check if pill is already selected
-    if (selectedPills.some(p => p.label === pill.label)) {
-      return
-    }
-
-    setSelectedPills(prev => [...prev, pill])
-
-    // Add pill text to current prompt
-    setCurrentPrompt(prev => {
-      if (prev.trim()) {
-        return prev + (prev.endsWith(' ') ? '' : ' ') + pill.text
-      }
-      return pill.text
-    })
-
-    // Close dropdown and reset search
-    setIsPillDropdownOpen(false)
-    setPillSearchText('')
-  }
-
-  const handleRemovePill = (pillLabel: string) => {
-    const pillToRemove = selectedPills.find(p => p.label === pillLabel)
-    if (!pillToRemove) return
-
-    setSelectedPills(prev => prev.filter(p => p.label !== pillLabel))
-
-    // Remove pill text from current prompt
-    setCurrentPrompt(prev => {
-      return prev.replace(pillToRemove.text, '').replace(/\s+/g, ' ').trim()
-    })
-  }
-
-  const getFilteredPills = () => {
-    if (!pillSearchText.trim()) {
-      return promptPills
-    }
-
-    const search = pillSearchText.toLowerCase()
-    return promptPills.filter(
-      pill =>
-        pill.label.toLowerCase().includes(search) ||
-        pill.text.toLowerCase().includes(search)
-    )
-  }
 
   const ensureGitRepositoryInitialized = async (
     projectPath: string,
@@ -835,13 +753,13 @@ export function ConversationView({
     })
   }
 
-  const handleExecute = async () => {
-    if (!projectContext || !currentPrompt.trim()) {
+  const handleExecute = async (promptText: string) => {
+    if (!projectContext || !promptText.trim()) {
       console.warn('Cannot execute: missing project context or prompt')
       return
     }
 
-    const userPromptText = currentPrompt.trim()
+    const userPromptText = promptText.trim()
 
     // ============================================================================
     // Permission Cancellation Logic
@@ -934,9 +852,7 @@ export function ConversationView({
     } else {
       setChatMessages(prev => [...prev, userMessage])
     }
-
-    // Clear input immediately
-    setCurrentPrompt('')
+    console.log('current chat messages', chatMessages);
 
     let promptId: string
     let conversationLogPath: string
@@ -962,19 +878,29 @@ export function ConversationView({
         console.log('Git Initialised on Branch: ', finalBranch)
 
         // Generate prompt ID
-        promptId = Date.now().toString()
+        promptId = uuidv4()
 
         // Create conversation log path
         const projectName =
           projectContext.projectPath.split('/').pop() || 'unknown'
-        conversationLogPath = `/Users/user/.almondcoder/${projectName}/prompts/conversations/${promptId}.json`
+        const appDataPath = await window.App.getAppDataPath()
+        conversationLogPath = `${appDataPath}/${projectName}/prompts/conversations/${promptId}.json`
+
+        // Save user message to conversation log immediately (before setSelectedConversation)
+        // This ensures the useEffect that loads messages will find the user message in the file
+        console.log('💬 Saving user message to conversation log:', userPromptText)
+        await updateConversationFile(
+          conversationLogPath,
+          { content: { type: 'text', text: userPromptText } },
+          Response.user
+        )
 
         // Create worktree
         console.log('Creating worktree for new conversation:', promptId)
         const worktreeResult = await window.App.createWorktree(
           projectContext.projectPath,
           finalBranch,
-          currentPrompt,
+          userPromptText,
           promptId,
           undefined
         )
@@ -996,7 +922,7 @@ export function ConversationView({
           conversationLogPath,
           createdAt: new Date(),
           updatedAt: new Date(),
-        }
+        } as ConversationHistory
 
         // Update selectedConversation immediately so real-time message updates work
         // This ensures selectedConversationRef.current.promptId matches the new promptId
@@ -1006,7 +932,7 @@ export function ConversationView({
         console.log('💾 Saving enhanced prompt to history...')
         await window.App.saveEnhancedPrompt({
           id: promptId,
-          prompt: currentPrompt,
+          prompt: userPromptText,
           startExecutionTime: new Date(),
           branch: worktreeBranchName,
           branchStatus: 'active',
@@ -1076,13 +1002,16 @@ export function ConversationView({
 
       // ============ PHASE 2: Common execution logic ============
 
-      // Save user message to conversation log
-      console.log('💬 Saving user message to conversation log:', userPromptText)
-      await updateConversationFile(
-        conversationLogPath,
-        { content: { type: 'text', text: userPromptText } },
-        Response.user
-      )
+      // Save user message to conversation log (for existing conversations only)
+      // New conversations already saved the message earlier
+      if (!isNewConversation) {
+        console.log('💬 Saving user message to conversation log:', userPromptText)
+        await updateConversationFile(
+          conversationLogPath,
+          { content: { type: 'text', text: userPromptText } },
+          Response.user
+        )
+      }
 
       // Mark conversation as busy
       console.log('⏳ Marking conversation as busy:', promptId)
@@ -1102,7 +1031,25 @@ export function ConversationView({
       const handleClaudeMessage = async (data: {
         type: string
         data: string
+        promptId?: string
       }) => {
+        // ============================================================================
+        // CRITICAL FIX: Filter messages by promptId to prevent session ID contamination
+        // ============================================================================
+        // LOGIC: Each handler receives ALL messages on the 'command-output' channel.
+        // If we don't filter, this handler will process messages from OTHER conversations,
+        // causing session ID contamination (lines 1072, 1092, 1108).
+        // By checking if the message's promptId matches THIS conversation's promptId,
+        // we ensure only the correct handler processes each message.
+        if (data.promptId && data.promptId !== promptId) {
+          console.log(
+            `⏭️ [FILTER] Ignoring message from different conversation:`,
+            `received: ${data.promptId}, expected: ${promptId}`
+          )
+          return // Exit early - prevents session ID contamination
+        }
+
+        console.log('✅ [FILTER] Message belongs to this conversation, processing...')
         console.log('🔔 handleClaudeMessage called!', data)
         try {
           console.log('🔍 Raw data received:', data)
@@ -1166,6 +1113,15 @@ export function ConversationView({
               return updatedBusyMap
             })
 
+            // Update selectedConversation for resumption
+            setSelectedConversation(prev => {
+              if (prev.promptId === promptId) {
+                console.log('✅ Updated selectedConversation with session ID')
+                return { ...prev, aiSessionId: sdkMessage.session_id }
+              }
+              return prev
+            })
+
             // Persist session ID to database for resumption
             try {
               // Reload prompt history to get latest data
@@ -1192,9 +1148,7 @@ export function ConversationView({
 
             // Update selected conversation with session ID (only if still selected)
             conversation.aiSessionId = sdkMessage.session_id
-            if (selectedConversationRef.current.promptId === promptId) {
-              setSelectedConversation(conversation)
-            }
+            
           }
 
           // Handle completion
@@ -1347,190 +1301,28 @@ export function ConversationView({
 
             {/* Input Container */}
             <div className="mb-4">
-              <div
-                className={`flex items-center gap-2 rounded-lg p-3 ${
-                  isLightTheme
-                    ? 'bg-white border border-gray-300'
-                    : 'bg-gray-800 border border-gray-700'
-                }`}
-              >
-                {/* Plus Button */}
-                <button
-                  className={`flex-shrink-0 ${
-                    isLightTheme
-                      ? 'text-gray-600 hover:text-gray-900'
-                      : 'text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      d="M12 4v16m8-8H4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                    />
-                  </svg>
-                </button>
-
-                {/* Input */}
-                <input
-                  className={`flex-1 outline-none text-sm bg-transparent ${
-                    isLightTheme
-                      ? 'text-gray-900 placeholder-gray-400'
-                      : 'text-white placeholder-gray-500'
-                  }`}
-                  onChange={e => setCurrentPrompt(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleExecute()
-                    }
-                  }}
-                  placeholder="Enter your prompt here..."
-                  type="text"
-                  value={currentPrompt}
-                />
-
-                {/* Branch Dropdown */}
-                <div className="relative">
-                  <button
-                    className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isLightTheme
-                        ? 'text-gray-700 bg-gray-50 hover:bg-gray-100 border-gray-300'
-                        : 'text-gray-300 bg-gray-700 hover:bg-gray-600 border-gray-600'
-                    }`}
-                    disabled={availableBranches.length === 0}
-                    onClick={() =>
-                      setIsBranchDropdownOpen(!isBranchDropdownOpen)
-                    }
-                  >
-                    <span className="text-green-500">🌿</span>
-                    <span>{selectedBranch || 'Select Branch'}</span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-
-                  {isBranchDropdownOpen && availableBranches.length > 0 && (
-                    <div
-                      className={`absolute top-full right-0 mt-2 rounded-lg shadow-xl z-20 min-w-[280px] max-h-48 overflow-y-auto ${
-                        isLightTheme
-                          ? 'bg-white border border-gray-300'
-                          : 'bg-gray-800 border border-gray-700'
-                      }`}
-                    >
-                      {getAvailableBranchesForNewPrompt().map(branch => (
-                        <button
-                          className={`w-full text-left px-4 py-3 first:rounded-t-lg last:rounded-b-lg transition-colors ${
-                            isLightTheme
-                              ? `hover:bg-gray-50 ${branch === selectedBranch ? 'bg-gray-50' : ''}`
-                              : `hover:bg-gray-700 ${branch === selectedBranch ? 'bg-gray-700' : ''}`
-                          }`}
-                          key={branch}
-                          onClick={() => {
-                            setSelectedBranch(branch)
-                            setSelectedWorktree(null)
-                            setIsBranchDropdownOpen(false)
-                          }}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span
-                              className={
-                                isLightTheme ? 'text-gray-600' : 'text-gray-400'
-                              }
-                            >
-                              •
-                            </span>
-                            <div
-                              className={`text-sm ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}
-                            >
-                              {branch}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Execute Button */}
-                <button
-                  className={`flex-shrink-0 p-2 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isLightTheme
-                      ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                  }`}
-                  disabled={
-                    !projectContext ||
-                    !currentPrompt.trim() ||
-                    !selectedBranch ||
-                    busyConversations.get(selectedConversation.promptId)
-                      ?.status === 'running'
-                  }
-                  onClick={handleExecute}
-                  title={
-                    !projectContext
-                      ? 'Please select a project first'
-                      : !currentPrompt.trim()
-                        ? 'Please enter a prompt'
-                        : !selectedBranch
-                          ? 'Please select a branch'
-                          : 'Execute the prompt'
-                  }
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      d="M5 10l7-7m0 0l7 7m-7-7v18"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                    />
-                  </svg>
-                </button>
-              </div>
+              <PromptInput
+                onExecute={handleExecute}
+                isNewConversation={isNewConversation}
+                isExecuting={
+                  busyConversations.get(selectedConversation.promptId)?.status === 'running'
+                }
+                projectContext={projectContext}
+                selectedBranch={selectedBranch}
+                availableBranches={availableBranches}
+                onBranchSelect={setSelectedBranch}
+                onWorktreeSelect={setSelectedWorktree}
+                getAvailableBranchesForNewPrompt={getAvailableBranchesForNewPrompt}
+              />
             </div>
 
-            {/* Prompt Pills */}
-            <div className="flex flex-wrap gap-2 justify-center">
-              {promptPills.map((pill, index) => {
-                const isActive = activePills.has(index)
-                return (
-                  <button
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 border ${
-                      isActive
-                        ? themeClasses.pillActive
-                        : themeClasses.pillInactive
-                    }`}
-                    key={index}
-                    onClick={() => handlePillClick(index, pill.text)}
-                  >
-                    <span
-                      className={`w-2 h-2 rounded-full transition-colors ${
-                        isActive
-                          ? themeClasses.pillActiveDot
-                          : themeClasses.pillInactiveDot
-                      }`}
-                    ></span>
-                    {pill.label}
-                  </button>
-                )
-              })}
-            </div>
           </div>
         </div>
       ) : chatMessages.length > 0 ? (
         /* Existing conversation with messages */
         <div
           ref={chatMessagesScrollRef}
-          className={`flex-1 overflow-y-auto ${isLightTheme ? 'bg-white' : themeClasses.bgSecondary} rounded-lg p-6 border ${themeClasses.borderPrimary} space-y-4 mb-2`}
+          className={`flex-1 overflow-y-auto ${isLightTheme ? 'bg-white' : themeClasses.bgSecondary} rounded-lg p-6 space-y-4 mb-2`}
         >
           {chatMessages.map((message, index) => {
             // Helper function to determine if this message should have a connecting line
@@ -1573,11 +1365,12 @@ export function ConversationView({
                 return (
                   <div className="mb-4 flex justify-end" key={message.id}>
                     <div
-                      className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                      className={`max-w-[80%] rounded-lg px-4 py-2.5 whitespace-pre-wrap select-text cursor-text ${
                         isLightTheme
                           ? 'bg-gray-100 text-gray-800'
                           : 'bg-gray-700 text-gray-200'
                       }`}
+                      style={{ fontSize: '0.8rem' }}
                     >
                       {message.text}
                     </div>
@@ -1592,16 +1385,15 @@ export function ConversationView({
                     <div
                       className="w-0.5 mr-3 border-l-2 border-dotted"
                       style={{
-                        borderColor: isLightTheme
-                          ? 'rgba(209, 213, 219, 0.6)' // light theme border - more prominent
-                          : 'rgba(75, 85, 99, 0.7)', // dark theme border - more prominent
+                        borderColor: theme.border.primary,
                       }}
                     />
                   )}
                   <div
-                    className={`flex-1 text-sm whitespace-pre-wrap ${
+                    className={`flex-1 whitespace-pre-wrap select-text cursor-text ${
                       isLightTheme ? 'text-gray-700' : 'text-gray-300'
                     } ${hasConnectingLine ? '' : 'ml-3'}`}
+                    style={{ fontSize: '0.8rem' }}
                   >
                     {message.text}
                   </div>
@@ -1627,6 +1419,10 @@ export function ConversationView({
                 message.toolInput?.old_string &&
                 message.toolInput?.new_string
 
+              // Check for TodoWrite tool with todos
+              const hasTodoContent =
+                message.toolName === 'TodoWrite' && message.toolInput?.todos
+
               return (
                 <div className="mb-3 flex" key={message.id}>
                   {/* Connecting line */}
@@ -1634,9 +1430,7 @@ export function ConversationView({
                     <div
                       className="w-0.5 mr-3 border-l-2 border-dotted"
                       style={{
-                        borderColor: isLightTheme
-                          ? 'rgba(209, 213, 219, 0.3)' // light theme border.secondary
-                          : 'rgba(55, 65, 81, 0.3)', // dark theme border.secondary
+                        borderColor: theme.border.hover,
                       }}
                     />
                   )}
@@ -1649,8 +1443,8 @@ export function ConversationView({
                         style={{ color: theme.text.tertiary }}
                       />
                       <span
-                        className="text-sm font-medium"
-                        style={{ color: theme.text.primary }}
+                        className="font-medium"
+                        style={{ color: theme.text.primary, fontSize: '0.8rem' }}
                       >
                         {message.toolName}
                       </span>
@@ -1683,15 +1477,23 @@ export function ConversationView({
                           customStyle={{
                             margin: 0,
                             borderRadius: 0,
-                            fontSize: '0.9rem',
+                            fontSize: '0.8rem',
                             fontWeight: 550,
                             background: isLightTheme ? '#f9fafb' : '#111827',
+                            cursor: 'text',
+                            userSelect: 'text',
                           }}
                           lineNumberStyle={{
                             minWidth: '3em',
                             paddingRight: '1em',
                             color: isLightTheme ? '#9ca3af' : '#6b7280',
                             userSelect: 'none',
+                          }}
+                          codeTagProps={{
+                            style: {
+                              cursor: 'text',
+                              userSelect: 'text',
+                            }
                           }}
                         >
                           {message.toolInput.content}
@@ -1732,15 +1534,23 @@ export function ConversationView({
                             customStyle={{
                               margin: 0,
                               borderRadius: 0,
-                              fontSize: '0.9rem',
+                              fontSize: '0.8rem',
                               fontWeight: 550,
                               background: isLightTheme ? '#f9fafb' : '#111827',
+                              cursor: 'text',
+                              userSelect: 'text',
                             }}
                             lineNumberStyle={{
                               minWidth: '3em',
                               paddingRight: '1em',
                               color: isLightTheme ? '#9ca3af' : '#6b7280',
                               userSelect: 'none',
+                            }}
+                            codeTagProps={{
+                              style: {
+                                cursor: 'text',
+                                userSelect: 'text',
+                              }
                             }}
                           >
                             {message.toolInput.old_string}
@@ -1771,9 +1581,11 @@ export function ConversationView({
                             customStyle={{
                               margin: 0,
                               borderRadius: 0,
-                              fontSize: '0.9rem',
+                              fontSize: '0.8rem',
                               fontWeight: 550,
                               background: isLightTheme ? '#f9fafb' : '#111827',
+                              cursor: 'text',
+                              userSelect: 'text',
                             }}
                             lineNumberStyle={{
                               minWidth: '3em',
@@ -1781,9 +1593,86 @@ export function ConversationView({
                               color: isLightTheme ? '#9ca3af' : '#6b7280',
                               userSelect: 'none',
                             }}
+                            codeTagProps={{
+                              style: {
+                                cursor: 'text',
+                                userSelect: 'text',
+                              }
+                            }}
                           >
                             {message.toolInput.new_string}
                           </SyntaxHighlighter>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Todo list for TodoWrite tool */}
+                    {hasTodoContent && (
+                      <div
+                        className={`rounded-md border mt-2 ${
+                          isLightTheme
+                            ? 'bg-gray-50/50 border-gray-200'
+                            : 'bg-gray-800/30 border-gray-700/50'
+                        }`}
+                      >
+                        <div className="p-2 space-y-1">
+                          {message.toolInput.todos.map((todo: TodoItem, todoIndex: number) => {
+                            const isCompleted = todo.status === 'completed'
+                            const isInProgress = todo.status === 'in_progress'
+
+                            return (
+                              <div
+                                key={todoIndex}
+                                className="flex items-center gap-2 py-1 px-2"
+                              >
+                                {/* Status Icon */}
+                                <div className="flex-shrink-0">
+                                  {isCompleted ? (
+                                    <CheckSquare
+                                      className="w-3.5 h-3.5"
+                                      style={{ color: isLightTheme ? '#22c55e' : '#4ade80' }}
+                                    />
+                                  ) : isInProgress ? (
+                                    <div
+                                      className="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center"
+                                      style={{
+                                        borderColor: isLightTheme ? '#3b82f6' : '#60a5fa',
+                                      }}
+                                    >
+                                      <div
+                                        className="w-1.5 h-1.5 rounded-full"
+                                        style={{
+                                          backgroundColor: isLightTheme ? '#3b82f6' : '#60a5fa',
+                                        }}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className="w-3.5 h-3.5 rounded border"
+                                      style={{
+                                        borderColor: isLightTheme ? '#d1d5db' : '#4b5563',
+                                      }}
+                                    />
+                                  )}
+                                </div>
+
+                                {/* Todo Content */}
+                                <div
+                                  className={`text-xs flex-1 cursor-text select-text ${
+                                    isCompleted
+                                      ? isLightTheme
+                                        ? 'text-gray-400 line-through'
+                                        : 'text-gray-500 line-through'
+                                      : isLightTheme
+                                        ? 'text-gray-700'
+                                        : 'text-gray-300'
+                                  }`}
+                                >
+                                  {isInProgress ? todo.activeForm : todo.content}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     )}
@@ -1805,39 +1694,50 @@ export function ConversationView({
                   : JSON.stringify(message.toolResult, null, 2)
 
               return (
-                <div className="flex justify-start mb-3" key={message.id}>
+                <div className="mb-3 flex" key={message.id}>
                   {/* Connecting line */}
                   {hasConnectingLine && (
                     <div
                       className="w-0.5 mr-3 border-l-2 border-dotted"
                       style={{
-                        borderColor: isLightTheme
-                          ? 'rgba(209, 213, 219, 0.3)' // light theme border.secondary
-                          : 'rgba(55, 65, 81, 0.3)', // dark theme border.secondary
+                        borderColor: theme.border.hover,
                       }}
                     />
                   )}
 
-                  <div
-                    className={`max-w-[85%] p-3 rounded-lg mr-12 ${
-                      isLightTheme
-                        ? 'bg-red-50 border border-red-200'
-                        : 'bg-red-900/30 border border-red-500/30'
-                    }`}
-                  >
-                    <div
-                      className={`text-xs font-medium mb-2 ${
-                        isLightTheme ? 'text-red-700' : 'text-red-300'
-                      }`}
-                    >
-                      ❌ Tool Error
+                  <div className="flex-1">
+                    {/* Tool error header */}
+                    <div className="flex items-center gap-2 py-1 mb-2">
+                      <XCircle
+                        className="w-4 h-4"
+                        style={{ color: theme.text.tertiary }}
+                      />
+                      <span
+                        className="font-medium"
+                        style={{ color: theme.text.primary, fontSize: '0.8rem' }}
+                      >
+                        Tool Error
+                      </span>
                     </div>
+
+                    {/* Error content - styled like code block */}
                     <div
-                      className={`text-sm whitespace-pre-wrap max-h-64 overflow-y-auto ${
-                        isLightTheme ? 'text-red-800' : 'text-red-200'
-                      }`}
+                      className="rounded-lg border overflow-hidden cursor-text"
+                      style={{
+                        backgroundColor: theme.background.tertiary,
+                        borderColor: theme.border.primary,
+                      }}
                     >
-                      {resultContent}
+                      <pre
+                        className="p-3 whitespace-pre-wrap max-h-64 overflow-y-auto select-text cursor-text font-mono"
+                        style={{
+                          fontSize: '0.8rem',
+                          margin: 0,
+                          color: theme.text.secondary,
+                        }}
+                      >
+                        {resultContent}
+                      </pre>
                     </div>
                   </div>
                 </div>
@@ -2003,7 +1903,7 @@ export function ConversationView({
 
               {/* Accept Button or Spinner */}
               {busyConversations.get(selectedConversation.promptId)?.status ===
-              'waiting_permission' ? (
+              'waiting_permission' && (
                 <button
                   className="bg-white text-gray-900 hover:bg-gray-100 px-4 py-1.5 rounded text-sm font-medium transition-colors"
                   onClick={handleAcceptPermission}
@@ -2011,259 +1911,33 @@ export function ConversationView({
                 >
                   Accept
                 </button>
-              ) : busyConversations.get(selectedConversation.promptId)
-                  ?.status === 'running' ? (
-                <div className="flex items-center gap-2 text-gray-300 text-sm">
-                  <div className="flex items-center space-x-1">
-                    <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"></div>
-                    <div
-                      className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
-                      style={{ animationDelay: '0.1s' }}
-                    ></div>
-                    <div
-                      className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
-                      style={{ animationDelay: '0.2s' }}
-                    ></div>
-                  </div>
-                  <span>accepting...</span>
-                </div>
-              ) : null}
+              )}
             </div>
           </div>
 
           {/* Textarea with integrated pill selector */}
           <div className="space-y-3">
-            <div
-              className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-none rounded-b-lg border-t-0 ${themeClasses.borderFocus}`}
-            >
-              {/* Textarea */}
-              <div className="relative">
-                <textarea
-                  className={`w-full p-4 pb-16 ${themeClasses.textPrimary} placeholder-gray-400 resize-none focus:outline-none bg-transparent h-32 min-h-[128px]`}
-                  onChange={e => {
-                    setCurrentPrompt(e.target.value)
-                    // Set to New Prompt when user types in a new conversation
-                    if (
-                      isNewConversation &&
-                      selectedConversation.promptId !== '+new'
-                    ) {
-                      setSelectedConversation(newConversation())
-                    }
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleExecute()
-                    }
-                  }}
-                  placeholder="Do something else"
-                  value={currentPrompt}
-                />
-
-                {/* Bottom bar with pills and execute button */}
-                <div className="absolute left-0 right-0 bottom-0 px-3 pb-3 flex items-center justify-between gap-2">
-                  {/* Left side: Plus icon and selected pills */}
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {/* Plus Icon Button */}
-                    <div className="relative" ref={pillDropdownRef}>
-                      <button
-                        className={`w-8 h-8 rounded flex items-center justify-center transition-colors flex-shrink-0 ${
-                          isLightTheme
-                            ? 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-                            : 'bg-gray-700 hover:bg-gray-600 text-gray-400'
-                        }`}
-                        onClick={() =>
-                          setIsPillDropdownOpen(!isPillDropdownOpen)
-                        }
-                        title="Add prompt template"
-                      >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            d="M12 4v16m8-8H4"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                          />
-                        </svg>
-                      </button>
-
-                      {/* Dropdown with Typeahead - Opens Upward */}
-                      {isPillDropdownOpen && (
-                        <div
-                          className={`absolute bottom-full left-0 mb-2 rounded-lg shadow-xl z-50 w-80 ${
-                            isLightTheme
-                              ? 'bg-white border border-gray-200'
-                              : 'bg-gray-800 border border-gray-700'
-                          }`}
-                        >
-                          {/* Filtered Pills List */}
-                          <div className="max-h-64 overflow-y-auto">
-                            {getFilteredPills().length > 0 ? (
-                              getFilteredPills().map((pill, index) => {
-                                const isSelected = selectedPills.some(
-                                  p => p.label === pill.label
-                                )
-                                return (
-                                  <button
-                                    className={`w-full text-left px-4 py-3 transition-colors first:rounded-t-lg last:rounded-b-lg ${
-                                      isSelected
-                                        ? isLightTheme
-                                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                        : isLightTheme
-                                          ? 'hover:bg-gray-50 text-gray-900'
-                                          : 'hover:bg-gray-700 text-gray-200'
-                                    }`}
-                                    disabled={isSelected}
-                                    key={index}
-                                    onClick={() =>
-                                      !isSelected && handleAddPill(pill)
-                                    }
-                                  >
-                                    <div className="font-medium text-sm">
-                                      {pill.label}
-                                    </div>
-                                    <div
-                                      className={`text-xs mt-1 ${
-                                        isLightTheme
-                                          ? 'text-gray-500'
-                                          : 'text-gray-400'
-                                      }`}
-                                    >
-                                      {pill.text.substring(0, 60)}...
-                                    </div>
-                                  </button>
-                                )
-                              })
-                            ) : (
-                              <div
-                                className={`px-4 py-8 text-center text-sm ${
-                                  isLightTheme
-                                    ? 'text-gray-500'
-                                    : 'text-gray-400'
-                                }`}
-                              >
-                                No templates found
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Search Input at Bottom */}
-                          <div className="p-3 border-t border-gray-200 dark:border-gray-700">
-                            <input
-                              autoFocus
-                              className={`w-full px-3 py-2 rounded-md text-sm outline-none ${
-                                isLightTheme
-                                  ? 'bg-gray-50 border border-gray-300 text-gray-900 placeholder-gray-400'
-                                  : 'bg-gray-700 border border-gray-600 text-white placeholder-gray-500'
-                              }`}
-                              onChange={e => setPillSearchText(e.target.value)}
-                              placeholder="Search templates..."
-                              type="text"
-                              value={pillSearchText}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Selected Pills on the Right */}
-                    <div className="flex flex-wrap gap-2 flex-1 min-w-0 overflow-x-auto">
-                      {selectedPills.map((pill, index) => (
-                        <div
-                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs border flex-shrink-0 ${
-                            isLightTheme
-                              ? 'bg-white border-gray-300 text-gray-700'
-                              : 'bg-gray-800 border-gray-600 text-gray-200'
-                          }`}
-                          key={index}
-                        >
-                          <span className="truncate max-w-[150px]">
-                            {pill.label}
-                          </span>
-                          <button
-                            className={`hover:opacity-70 transition-opacity ${
-                              isLightTheme ? 'text-gray-500' : 'text-gray-400'
-                            }`}
-                            onClick={() => handleRemovePill(pill.label)}
-                            title="Remove"
-                          >
-                            <svg
-                              className="w-3 h-3"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                d="M6 18L18 6M6 6l12 12"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Right side: Execute button */}
-                  <button
-                    className={`disabled:opacity-50 disabled:cursor-not-allowed p-2 rounded transition-colors flex items-center justify-center flex-shrink-0 ${
-                      busyConversations.get(selectedConversation.promptId)
-                        ?.status === 'running'
-                        ? isLightTheme
-                          ? 'bg-gray-400'
-                          : 'bg-gray-600'
-                        : isLightTheme
-                          ? 'bg-black hover:bg-gray-800'
-                          : 'bg-white hover:bg-gray-200'
-                    }`}
-                    disabled={
-                      !projectContext ||
-                      !currentPrompt.trim() ||
-                      (isNewConversation && !selectedBranch) ||
-                      busyConversations.get(selectedConversation.promptId)
-                        ?.status === 'running'
-                    }
-                    onClick={handleExecute}
-                    title={
-                      !projectContext
-                        ? 'Please select a project first'
-                        : !currentPrompt.trim()
-                          ? 'Please enter a prompt'
-                          : isNewConversation && !selectedBranch
-                            ? 'Please select a branch'
-                            : busyConversations.get(
-                                  selectedConversation.promptId
-                                )?.status === 'running'
-                              ? 'This conversation is currently executing'
-                              : isNewConversation
-                                ? 'Create new conversation and execute'
-                                : 'Execute the prompt'
-                    }
-                  >
-                    <ArrowUp
-                      className={`w-4 h-4 ${
-                        busyConversations.get(selectedConversation.promptId)
-                          ?.status === 'running'
-                          ? isLightTheme
-                            ? 'text-white'
-                            : 'text-gray-300'
-                          : isLightTheme
-                            ? 'text-white'
-                            : 'text-black'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-            </div>
+            <PromptInput
+              onExecute={handleExecute}
+              isNewConversation={false}
+              isExecuting={
+                busyConversations.get(selectedConversation.promptId)?.status === 'running'
+              }
+              projectContext={projectContext}
+              selectedBranch={selectedBranch}
+              availableBranches={availableBranches}
+              onBranchSelect={setSelectedBranch}
+              onWorktreeSelect={setSelectedWorktree}
+              getAvailableBranchesForNewPrompt={getAvailableBranchesForNewPrompt}
+              onNewConversation={() => {
+                if (
+                  isNewConversation &&
+                  selectedConversation.promptId !== '+new'
+                ) {
+                  setSelectedConversation(newConversation())
+                }
+              }}
+            />
           </div>
 
           {/* Status Messages */}

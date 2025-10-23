@@ -31,8 +31,9 @@ interface DiffLine {
 }
 
 export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
-  const { theme } = useTheme()
+  const { theme, themeName } = useTheme()
   const themeClasses = createThemeClasses(theme)
+  const isLightTheme = themeName === 'light'
 
   const [diffs, setDiffs] = useState<FileDiff[]>([])
   const [loading, setLoading] = useState(true)
@@ -179,26 +180,24 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
   const totalDeletions = diffs.reduce((sum, diff) => sum + diff.deletions, 0)
 
   return (
-    <div className="space-y-4">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Summary Header */}
       <div
-        className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-4`}
+        className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-3 mb-3 flex-shrink-0`}
       >
         <div className="flex items-center justify-between">
           <div>
-            <h3
-              className={`text-md font-semibold ${themeClasses.textPrimary} mb-1`}
-            >
+            <h3 className={`text-sm font-semibold ${themeClasses.textPrimary}`}>
               {diffs.length} file{diffs.length !== 1 ? 's' : ''} changed
             </h3>
-            <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-3 text-xs mt-1">
               <span className="text-green-400 flex items-center gap-1">
                 <Plus className="w-3 h-3" />
-                {totalAdditions} addition{totalAdditions !== 1 ? 's' : ''}
+                {totalAdditions}
               </span>
               <span className="text-red-400 flex items-center gap-1">
                 <Minus className="w-3 h-3" />
-                {totalDeletions} deletion{totalDeletions !== 1 ? 's' : ''}
+                {totalDeletions}
               </span>
             </div>
           </div>
@@ -211,8 +210,8 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
         </div>
       </div>
 
-      {/* File Diffs */}
-      <div className="space-y-3">
+      {/* File Diffs - Scrollable */}
+      <div className="flex-1 overflow-y-auto space-y-3 pr-2">
         {diffs.map(diff => {
           const isExpanded = expandedFiles.has(diff.filePath)
 
@@ -262,9 +261,9 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                 </div>
               </button>
 
-              {/* Diff Content */}
+              {/* Diff Content - Scrollable */}
               {isExpanded && (
-                <div className="font-mono text-xs">
+                <div className="max-h-96 overflow-y-auto font-mono text-xs">
                   {diff.hunks.map((hunk, hunkIndex) => (
                     <div key={hunkIndex}>
                       {hunk.lines.map((line, lineIndex) => {
@@ -273,7 +272,12 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                         if (line.type === 'header') {
                           return (
                             <div
-                              className="bg-blue-900/20 text-blue-300 px-4 py-1 border-t border-b border-blue-900/30"
+                              className="px-3 py-1 border-t border-b sticky top-0"
+                              style={{
+                                backgroundColor: theme.background.tertiary,
+                                color: theme.text.accent,
+                                borderColor: theme.border.primary,
+                              }}
                               key={lineKey}
                             >
                               {line.content}
@@ -283,36 +287,76 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
 
                         const bgColor =
                           line.type === 'added'
-                            ? 'bg-green-900/20 border-l-2 border-green-500'
+                            ? isLightTheme
+                              ? 'rgba(34, 197, 94, 0.08)'
+                              : 'rgba(34, 197, 94, 0.12)'
                             : line.type === 'deleted'
-                              ? 'bg-red-900/20 border-l-2 border-red-500'
-                              : 'bg-transparent'
+                              ? isLightTheme
+                                ? 'rgba(239, 68, 68, 0.08)'
+                                : 'rgba(239, 68, 68, 0.12)'
+                              : 'transparent'
+
+                        const borderColor =
+                          line.type === 'added'
+                            ? isLightTheme
+                              ? '#22c55e'
+                              : '#4ade80'
+                            : line.type === 'deleted'
+                              ? isLightTheme
+                                ? '#ef4444'
+                                : '#f87171'
+                              : 'transparent'
 
                         const textColor =
                           line.type === 'added'
-                            ? 'text-green-200'
+                            ? isLightTheme
+                              ? '#166534'
+                              : '#86efac'
                             : line.type === 'deleted'
-                              ? 'text-red-200'
-                              : 'text-gray-400'
+                              ? isLightTheme
+                                ? '#991b1b'
+                                : '#fca5a5'
+                              : theme.text.secondary
 
                         return (
                           <div
-                            className={`${bgColor} ${textColor} px-4 py-0.5 flex items-start`}
+                            className="flex items-start cursor-text select-text hover:brightness-95"
+                            style={{
+                              backgroundColor: bgColor,
+                              borderLeft:
+                                line.type !== 'context'
+                                  ? `2px solid ${borderColor}`
+                                  : 'none',
+                            }}
                             key={lineKey}
                           >
-                            <span className="w-16 text-gray-500 select-none flex-shrink-0 text-right mr-4">
-                              {line.type === 'deleted' ||
-                              line.type === 'context'
-                                ? line.oldLineNumber || ''
-                                : ''}
-                              {' | '}
-                              {line.type === 'added' || line.type === 'context'
-                                ? line.newLineNumber || ''
-                                : ''}
+                            <span
+                              className="flex-shrink-0 text-right px-2 select-none"
+                              style={{
+                                width: '70px',
+                                color: theme.text.muted,
+                              }}
+                            >
+                              <span className="inline-block w-7 text-right">
+                                {line.type === 'deleted' || line.type === 'context'
+                                  ? line.oldLineNumber || ''
+                                  : ''}
+                              </span>
+                              <span className="inline-block w-7 text-right ml-1">
+                                {line.type === 'added' || line.type === 'context'
+                                  ? line.newLineNumber || ''
+                                  : ''}
+                              </span>
                             </span>
-                            <span className="flex-1 whitespace-pre-wrap break-all">
+                            <pre
+                              className="flex-1 px-3 py-0.5 m-0 whitespace-pre-wrap break-all"
+                              style={{
+                                color: textColor,
+                                fontFamily: 'inherit',
+                              }}
+                            >
                               {line.content}
-                            </span>
+                            </pre>
                           </div>
                         )
                       })}

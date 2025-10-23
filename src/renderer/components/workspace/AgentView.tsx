@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import type { PromptAgent } from '../../../shared/types'
 
@@ -8,15 +9,170 @@ interface AgentViewProps {
 }
 
 export function AgentView({ agents, setAgents }: AgentViewProps) {
-  const { theme } = useTheme()
+  const { theme, themeName } = useTheme()
   const themeClasses = createThemeClasses(theme)
+  const isLightTheme = themeName === 'light'
 
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<PromptAgent | null>(null)
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
+  const [newAgent, setNewAgent] = useState<Omit<PromptAgent, 'id' | 'createdAt' | 'updatedAt'>>({
+    name: '',
+    systemPrompt: '',
+    tools: [],
+  })
+
+  const handleCreateNewAgent = () => {
+    setIsCreatingNew(true)
+    setEditingAgentId(null)
+    setEditingAgent(null)
+  }
+
+  const handleSaveNewAgent = () => {
+    if (newAgent.name.trim() && newAgent.systemPrompt.trim()) {
+      const agent: PromptAgent = {
+        id: Date.now().toString(),
+        name: newAgent.name,
+        systemPrompt: newAgent.systemPrompt,
+        tools: newAgent.tools,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      setAgents([...agents, agent])
+      setIsCreatingNew(false)
+      setNewAgent({ name: '', systemPrompt: '', tools: [] })
+    }
+  }
+
+  const handleCancelNewAgent = () => {
+    setIsCreatingNew(false)
+    setNewAgent({ name: '', systemPrompt: '', tools: [] })
+  }
 
   return (
-    <div className="h-full overflow-y-auto space-y-4 pr-2">
-      {agents.map(agent => (
+    <div className="h-full flex flex-col">
+      {/* Header with Create New Agent Button */}
+      <div className="flex items-center justify-between mb-4 pb-3">
+        <button
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            isLightTheme
+              ? 'bg-black text-white hover:bg-gray-800'
+              : 'bg-white text-black hover:bg-gray-200'
+          }`}
+          onClick={handleCreateNewAgent}
+          disabled={isCreatingNew}
+        >
+          <Plus className="w-4 h-4" />
+          New Agent
+        </button>
+      </div>
+
+      {/* Content Area */}
+      <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+        {/* Create New Agent Form */}
+        {isCreatingNew && (
+          <div
+            className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-6`}
+          >
+            <div className="space-y-4">
+              <div>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
+                  Agent Name
+                </label>
+                <input
+                  className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus}`}
+                  onChange={e => {
+                    setNewAgent({ ...newAgent, name: e.target.value })
+                  }}
+                  placeholder="Enter agent name"
+                  type="text"
+                  value={newAgent.name}
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
+                  System Prompt
+                </label>
+                <textarea
+                  className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus} min-h-[120px]`}
+                  onChange={e => {
+                    setNewAgent({ ...newAgent, systemPrompt: e.target.value })
+                  }}
+                  placeholder="Enter system prompt for this agent"
+                  value={newAgent.systemPrompt}
+                />
+              </div>
+
+              <div>
+                <label
+                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
+                >
+                  Available Tools
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'Read',
+                    'Write',
+                    'Edit',
+                    'Bash',
+                    'Glob',
+                    'Grep',
+                    'Task',
+                    'WebFetch',
+                    'WebSearch',
+                    'TodoWrite',
+                  ].map(tool => (
+                    <button
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border-2 ${
+                        newAgent.tools.includes(tool)
+                          ? `${themeClasses.interactivePrimaryBg} ${themeClasses.interactivePrimaryText} ${themeClasses.borderFocus}`
+                          : `${themeClasses.bgSecondary} ${themeClasses.textSecondary} border-transparent ${themeClasses.borderHover}`
+                      }`}
+                      key={tool}
+                      onClick={() => {
+                        const updatedTools = newAgent.tools.includes(tool)
+                          ? newAgent.tools.filter(t => t !== tool)
+                          : [...newAgent.tools, tool]
+                        setNewAgent({ ...newAgent, tools: updatedTools })
+                      }}
+                    >
+                      {tool}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <button
+                  className={`px-4 py-2 rounded-lg text-sm font-medium ${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} hover:${themeClasses.bgInput} transition-colors`}
+                  onClick={handleCancelNewAgent}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    newAgent.name.trim() && newAgent.systemPrompt.trim()
+                      ? `${themeClasses.interactivePrimaryBg} hover:${themeClasses.interactivePrimaryBgHover} ${themeClasses.interactivePrimaryText}`
+                      : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                  }`}
+                  onClick={handleSaveNewAgent}
+                  disabled={!newAgent.name.trim() || !newAgent.systemPrompt.trim()}
+                >
+                  Create Agent
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Existing Agents */}
+        {agents.map(agent => (
         <div
           className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-6`}
           key={agent.id}
@@ -184,8 +340,12 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
                 <div className="flex flex-wrap gap-2">
                   {agent.tools.map(tool => (
                     <span
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${themeClasses.interactivePrimaryBg} bg-opacity-20 ${themeClasses.textAccent} border ${themeClasses.borderFocus} border-opacity-30`}
+                      className="text-xs px-2 py-0.5 rounded"
                       key={tool}
+                      style={{
+                        backgroundColor: theme.background.labels,
+                        color: theme.text.muted,
+                      }}
                     >
                       {tool}
                     </span>
@@ -196,6 +356,7 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
           )}
         </div>
       ))}
+      </div>
     </div>
   )
 }

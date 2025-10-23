@@ -230,14 +230,10 @@ export async function executeClaudeQuery(
         type: 'stdout',
         data: jsonMessage + '\n', // Add newline to match CLI format
         rawData: false, // This is JSON, not ANSI
+        promptId: promptId, // Identify which conversation this message belongs to
       })
 
-      // Log full message content for debugging
-      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-      console.log(`📤 SDK Message #${messageCount}: ${message.type}`)
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-      console.log(JSON.stringify(message, null, 2))
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+      
     }
 
     console.log(
@@ -258,6 +254,7 @@ export async function executeClaudeQuery(
           messageCount,
         }) + '\n',
       rawData: false,
+      promptId: promptId, // Identify which conversation this error belongs to
     })
 
     // If we got at least one message, the query partially succeeded

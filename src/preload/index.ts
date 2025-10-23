@@ -19,6 +19,7 @@ const API = {
   username: process.env.USER,
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getRecentProjects: () => ipcRenderer.invoke('get-recent-projects'),
+  getAppDataPath: () => ipcRenderer.invoke('get-app-data-path'),
   addRecentProject: (project: { name: string; path: string }) =>
     ipcRenderer.invoke('add-recent-project', project),
   isGitRepository: (path: string) =>
@@ -85,6 +86,8 @@ const API = {
     ipcRenderer.invoke('cleanup-worktree', worktreePath),
   validateWorktree: (worktreePath: string) =>
     ipcRenderer.invoke('validate-worktree', worktreePath),
+  openTerminalAtPath: (path: string) =>
+    ipcRenderer.invoke('open-terminal-at-path', path),
   // ============================================================================
   // Claude SDK method - streams JSON messages in real-time
   // ============================================================================

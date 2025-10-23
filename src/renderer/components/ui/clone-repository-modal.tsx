@@ -21,17 +21,8 @@ export function CloneRepositoryModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!repoUrl.trim()) {
-      setError('Please enter a repository URL')
-      return
-    }
+    
 
-    if (!repoUrl.includes('://')) {
-      setError(
-        'Please enter a valid URL (e.g., https://github.com/user/repo.git)'
-      )
-      return
-    }
 
     setIsLoading(true)
     setError('')
@@ -78,7 +69,6 @@ export function CloneRepositoryModal({
               id="repo-url"
               onChange={e => setRepoUrl(e.target.value)}
               placeholder="https://github.com/username/repository.git"
-              type="url"
               value={repoUrl}
             />
           </div>
