@@ -23,7 +23,19 @@ import { promisify } from 'node:util'
 import { makeAppWithSingleInstanceLock } from 'lib/electron-app/factories/app/instance'
 import { makeAppSetup } from 'lib/electron-app/factories/app/setup'
 import { MainWindow } from './windows/main'
-import { executeClaudeQuery } from './claude-sdk'
+import {
+  executeClaudeQuery,
+  updateAutoAcceptState,
+  getAllConversationStates,
+  updateConversationState,
+  type ConversationState,
+} from './claude-sdk'
+import {
+  createWorktree,
+  removeWorktree,
+  validateWorktreePath,
+} from './worktree-manager'
+import { parseGitDiff } from './git-diff-parser'
 import type {
   EnhancedPromptHistoryItem,
   ConversationHistory,
@@ -253,25 +265,6 @@ const validateConversationData = (data: any): data is ConversationHistory => {
   return true
 }
 
-const validateWorktreePath = async (worktreePath: string): Promise<boolean> => {
-  try {
-    if (!existsSync(worktreePath)) {
-      console.log('Worktree path does not exist:', worktreePath)
-      return false
-    }
-
-    // Check if it's a valid git worktree
-    const { stdout } = await execAsync('git worktree list --porcelain', {
-      cwd: worktreePath,
-    })
-
-    return stdout.includes(worktreePath)
-  } catch (error) {
-    console.error('Error validating worktree path:', error)
-    return false
-  }
-}
-
 const loadConversationHistory = (
   projectPath: string,
   promptId: string
@@ -369,202 +362,23 @@ const getCurrentBranchStatus = async (
   }
 }
 
-// Worktree utility functions
-const generateShortUuid = (): string => {
-  const timestamp = Date.now().toString(36)
-  const random = Math.random().toString(36).substring(2, 6)
-  return `${timestamp}-${random}`.substring(0, 8)
-}
-
-const sanitizePromptName = (prompt: string): string => {
-  return prompt
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '') // Remove special characters
-    .replace(/\s+/g, '-') // Replace spaces with hyphens
-    .substring(0, 30) // Limit length
-    .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
-}
-
-const createWorktree = async (
-  projectPath: string,
-  branch: string,
-  promptText: string,
-  promptId: string,
-  parentWorktreePath?: string
-): Promise<WorktreeInfo> => {
-  console.log('Creating worktree with params:', {
-    projectPath,
-    branch,
-    promptText: promptText.substring(0, 50),
-    promptId,
-    parentWorktreePath,
-  })
-
-  // STEP 1: Check if repository has any commits
-  let hasCommits = true
-  try {
-    await execAsync('git rev-parse HEAD', { cwd: projectPath })
-  } catch (error) {
-    hasCommits = false
-    console.log('Repository has no commits yet, creating initial commit')
-  }
-
-  // STEP 2: Create initial commit if needed
-  if (!hasCommits) {
-    try {
-      // Try to create initial commit with --allow-empty
-      await execAsync('git commit --allow-empty -m "Initial commit"', {
-        cwd: projectPath,
-      })
-      console.log('Created initial empty commit')
-    } catch (commitError: any) {
-      console.error('Error creating initial commit:', commitError)
-      throw new Error(
-        `Cannot create worktree: Repository has no commits and initial commit failed: ${commitError.message}`
-      )
-    }
-  }
-
-  // STEP 3: Validate and sanitize branch name
-  let validBranch = branch.trim()
-
-  // STEP 4: Check if branch exists in the repository
-  try {
-    await execAsync(`git rev-parse --verify "${validBranch}"`, {
-      cwd: projectPath,
-    })
-    console.log(`Branch "${validBranch}" exists`)
-  } catch (error) {
-    console.log(
-      `Branch "${validBranch}" doesn't exist, attempting to create or find default branch`
-    )
-
-    // Try to get current branch name
-    try {
-      const { stdout: currentBranchOutput } = await execAsync(
-        'git rev-parse --abbrev-ref HEAD',
-        { cwd: projectPath }
-      )
-      const currentBranch = currentBranchOutput.trim()
-
-      // If we want 'main' but we're on a different branch, rename it
-      if (validBranch === 'main' && currentBranch !== 'main') {
-        try {
-          await execAsync('git branch -M main', { cwd: projectPath })
-          console.log(`Renamed branch ${currentBranch} to main`)
-          validBranch = 'main'
-        } catch (renameError) {
-          console.error('Error renaming branch:', renameError)
-          // Use current branch if rename fails
-          validBranch = currentBranch
-        }
-      } else {
-        // Use current branch
-        validBranch = currentBranch
-      }
-    } catch (currentBranchError) {
-      console.error('Error getting current branch:', currentBranchError)
-      // Last resort: try to get default branch from remote
-      try {
-        const { stdout } = await execAsync(
-          'git symbolic-ref refs/remotes/origin/HEAD',
-          { cwd: projectPath }
-        )
-        validBranch = stdout.trim().replace('refs/remotes/origin/', '')
-      } catch {
-        // Absolute fallback
-        validBranch = 'main'
-      }
-    }
-  }
-
-  const projectName = basename(projectPath)
-  const sanitizedPromptName = sanitizePromptName(promptText)
-  const shortUuid = generateShortUuid()
-  const worktreeName = `${sanitizedPromptName}-${shortUuid}`
-
-  const almondcoderDir = join(homedir(), '.almondcoder')
-  if (!existsSync(almondcoderDir)) {
-    mkdirSync(almondcoderDir, { recursive: true })
-  }
-
-  const projectWorktreeDir = join(almondcoderDir, projectName)
-  if (!existsSync(projectWorktreeDir)) {
-    mkdirSync(projectWorktreeDir, { recursive: true })
-  }
-
-  const worktreePath = join(projectWorktreeDir, worktreeName)
-
-  try {
-    // Create a unique branch name for this worktree
-    // Format: almondcoder/<prompt-name>-<uuid>
-    const uniqueBranchName = `almondcoder/${sanitizedPromptName}-${shortUuid}`
-    console.log(`🌿 Creating worktree with branch name: ${uniqueBranchName}`)
-
-    // If we have a parent worktree, create from it
-    if (parentWorktreePath && existsSync(parentWorktreePath)) {
-      console.log(`Creating worktree from parent: ${parentWorktreePath}`)
-
-      // Create worktree from the parent worktree's current state
-      // Use the parent worktree as the working directory to get its current branch/commit
-      const { stdout: parentCommit } = await execAsync('git rev-parse HEAD', {
-        cwd: parentWorktreePath,
-      })
-
-      const commitHash = parentCommit.trim()
-      console.log(`Parent worktree is at commit: ${commitHash}`)
-
-      // Create new worktree with a new branch based on the parent's commit
-      await execAsync(
-        `git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${commitHash}"`,
-        {
-          cwd: projectPath,
-        }
-      )
-
-      console.log(
-        `✅ Created worktree: ${worktreePath} with branch ${uniqueBranchName} from parent worktree commit: ${commitHash}`
-      )
-    } else {
-      // Create new branch from the validated branch and create worktree on it
-      await execAsync(
-        `git worktree add -b "${uniqueBranchName}" "${worktreePath}" "${validBranch}"`,
-        {
-          cwd: projectPath,
-        }
-      )
-
-      console.log(
-        `✅ Created worktree: ${worktreePath} with branch ${uniqueBranchName} from branch: ${validBranch}`
-      )
-    }
-
-    return {
-      worktreePath,
-      promptId,
-      projectName,
-      sanitizedPromptName,
-      shortUuid,
-      branchName: uniqueBranchName,
-    }
-  } catch (error: any) {
-    console.error('Error creating worktree:', error)
-    throw new Error(`Failed to create worktree: ${error.message}`)
-  }
-}
-
-const removeWorktree = async (worktreePath: string): Promise<void> => {
-  try {
-    // Remove the worktree
-    await execAsync(`git worktree remove "${worktreePath}"`)
-    console.log(`Removed worktree: ${worktreePath}`)
-  } catch (error: any) {
-    console.error('Error removing worktree:', error)
-    // Don't throw error for cleanup, just log it
-  }
-}
+// Note: Worktree utility functions have been moved to ./worktree-manager.ts
 
 // IPC Handlers
+ipcMain.handle('set-window-title', async (event, title: string) => {
+  try {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) {
+      window.setTitle(title)
+      return { success: true }
+    }
+    return { success: false, error: 'Window not found' }
+  } catch (error: any) {
+    console.error('Error setting window title:', error)
+    return { success: false, error: error.message }
+  }
+})
+
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
@@ -622,16 +436,19 @@ ipcMain.handle('read-project-memory', async (event, projectPath: string) => {
   }
 })
 
-ipcMain.handle('save-project-memory', async (event, projectPath: string, content: string) => {
-  try {
-    const claudeMdPath = join(projectPath, 'CLAUDE.md')
-    writeFileSync(claudeMdPath, content, 'utf-8')
-    return true
-  } catch (error) {
-    console.error('Error saving CLAUDE.md:', error)
-    throw error
+ipcMain.handle(
+  'save-project-memory',
+  async (event, projectPath: string, content: string) => {
+    try {
+      const claudeMdPath = join(projectPath, 'CLAUDE.md')
+      writeFileSync(claudeMdPath, content, 'utf-8')
+      return true
+    } catch (error) {
+      console.error('Error saving CLAUDE.md:', error)
+      throw error
+    }
   }
-})
+)
 
 // Settings IPC handlers - General settings management
 ipcMain.handle('get-project-settings', async (event, projectPath: string) => {
@@ -644,34 +461,37 @@ ipcMain.handle('get-project-settings', async (event, projectPath: string) => {
   }
 })
 
-ipcMain.handle('save-project-settings', async (event, projectPath: string, settings: ProjectSettings) => {
-  try {
-    let metadata = loadProjectMetadata(projectPath)
+ipcMain.handle(
+  'save-project-settings',
+  async (event, projectPath: string, settings: ProjectSettings) => {
+    try {
+      let metadata = loadProjectMetadata(projectPath)
 
-    if (!metadata) {
-      // Create metadata if it doesn't exist
-      const projectName = basename(projectPath)
-      metadata = {
-        projectName,
-        projectPath,
-        createdAt: new Date(),
-        lastUsed: new Date(),
-        totalPrompts: 0,
-        settings,
+      if (!metadata) {
+        // Create metadata if it doesn't exist
+        const projectName = basename(projectPath)
+        metadata = {
+          projectName,
+          projectPath,
+          createdAt: new Date(),
+          lastUsed: new Date(),
+          totalPrompts: 0,
+          settings,
+        }
+      } else {
+        // Update existing metadata with new settings
+        metadata.settings = settings
+        metadata.lastUsed = new Date()
       }
-    } else {
-      // Update existing metadata with new settings
-      metadata.settings = settings
-      metadata.lastUsed = new Date()
-    }
 
-    saveProjectMetadata(projectPath, metadata)
-    return true
-  } catch (error) {
-    console.error('Error saving project settings:', error)
-    throw error
+      saveProjectMetadata(projectPath, metadata)
+      return true
+    } catch (error) {
+      console.error('Error saving project settings:', error)
+      throw error
+    }
   }
-})
+)
 
 // Enhanced Prompt history IPC handlers
 ipcMain.handle('get-enhanced-prompt-history', (event, projectPath) => {
@@ -843,115 +663,54 @@ ipcMain.handle('get-git-diff', async (event, path) => {
       return { diffs: [], error: null }
     }
 
-    // Parse the diff output
-    const diffs: any[] = []
-    const diffLines = stdout.split('\n')
+    // Parse using the new parser
+    const parsedFiles = parseGitDiff(stdout)
 
-    let currentFile: any = null
-    let currentHunk: any = null
-    let oldLineNumber = 0
-    let newLineNumber = 0
-
-    for (let i = 0; i < diffLines.length; i++) {
-      const line = diffLines[i]
-
-      // New file header (diff --git)
-      if (line.startsWith('diff --git')) {
-        if (currentFile) {
-          diffs.push(currentFile)
-        }
-
-        // Extract file path from "diff --git a/path b/path"
-        const match = line.match(/diff --git a\/(.*?) b\/(.*)/)
-        const filePath = match ? match[2] : 'unknown'
-
-        currentFile = {
-          filePath,
-          status: 'modified',
-          additions: 0,
-          deletions: 0,
-          hunks: [],
-        }
-        currentHunk = null
-      }
-
-      // File status indicators
-      if (line.startsWith('new file mode')) {
-        if (currentFile) currentFile.status = 'added'
-      } else if (line.startsWith('deleted file mode')) {
-        if (currentFile) currentFile.status = 'deleted'
-      }
-
-      // Hunk header (@@ -oldStart,oldLines +newStart,newLines @@)
-      if (line.startsWith('@@')) {
-        if (currentHunk) {
-          currentFile?.hunks.push(currentHunk)
-        }
-
-        const match = line.match(
-          /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/
-        )
-        if (match) {
-          oldLineNumber = parseInt(match[1], 10)
-          const oldLines = match[2] ? parseInt(match[2], 10) : 1
-          newLineNumber = parseInt(match[3], 10)
-          const newLines = match[4] ? parseInt(match[4], 10) : 1
-
-          currentHunk = {
-            oldStart: oldLineNumber,
-            oldLines,
-            newStart: newLineNumber,
-            newLines,
-            lines: [
-              {
-                type: 'header',
-                content: line,
-              },
-            ],
-          }
-        }
-      } else if (
-        currentHunk &&
-        !line.startsWith('diff --git') &&
-        !line.startsWith('index ') &&
-        !line.startsWith('---') &&
-        !line.startsWith('+++') &&
-        !line.startsWith('new file') &&
-        !line.startsWith('deleted file')
-      ) {
-        // Diff content lines
-        if (line.startsWith('+')) {
-          currentHunk.lines.push({
-            type: 'added',
-            content: line.substring(1),
-            newLineNumber: newLineNumber++,
-          })
-          if (currentFile) currentFile.additions++
-        } else if (line.startsWith('-')) {
-          currentHunk.lines.push({
-            type: 'deleted',
-            content: line.substring(1),
-            oldLineNumber: oldLineNumber++,
-          })
-          if (currentFile) currentFile.deletions++
-        } else if (line.startsWith(' ')) {
-          currentHunk.lines.push({
-            type: 'context',
-            content: line.substring(1),
-            oldLineNumber: oldLineNumber++,
-            newLineNumber: newLineNumber++,
-          })
-        }
-      }
-    }
-
-    // Push the last file and hunk
-    if (currentHunk) {
-      currentFile?.hunks.push(currentHunk)
-    }
-    if (currentFile) {
-      diffs.push(currentFile)
-    }
+    // Transform to UI format
+    const diffs = parsedFiles.map(file => ({
+      filePath: file.newPath || file.oldPath,
+      status:
+        file.type === 'add'
+          ? 'added'
+          : file.type === 'delete'
+            ? 'deleted'
+            : 'modified',
+      additions: file.hunks.reduce(
+        (sum, hunk) => sum + hunk.changes.filter(c => c.isInsert).length,
+        0
+      ),
+      deletions: file.hunks.reduce(
+        (sum, hunk) => sum + hunk.changes.filter(c => c.isDelete).length,
+        0
+      ),
+      hunks: file.hunks.map(hunk => ({
+        oldStart: hunk.oldStart,
+        oldLines: hunk.oldLines,
+        newStart: hunk.newStart,
+        newLines: hunk.newLines,
+        lines: [
+          {
+            type: 'header',
+            content: hunk.content,
+          },
+          ...hunk.changes.map(change => ({
+            type:
+              change.type === 'normal'
+                ? 'context'
+                : change.isDelete
+                  ? 'deleted'
+                  : 'added',
+            content: change.content,
+            oldLineNumber:
+              change.oldLineNumber ||
+              (change.isDelete ? change.lineNumber : undefined),
+            newLineNumber:
+              change.newLineNumber ||
+              (change.isInsert ? change.lineNumber : undefined),
+          })),
+        ],
+      })),
+    }))
 
     return { diffs, error: null }
   } catch (error) {
@@ -965,8 +724,6 @@ ipcMain.handle('get-git-diff', async (event, path) => {
 
 ipcMain.handle('clone-repository', async (event, repoUrl) => {
   try {
-   
-
     // First, let user select destination folder
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],
@@ -1408,6 +1165,82 @@ ipcMain.handle('validate-worktree', async (event, worktreePath) => {
   }
 })
 
+// Helper function to get worktree information from git for a specific branch
+async function getWorktreeInfoFromGit(
+  projectPath: string,
+  branchName: string
+): Promise<{ worktreePath: string; branch: string } | null> {
+  try {
+    const { stdout } = await execAsync('git worktree list --porcelain', {
+      cwd: projectPath,
+    })
+
+    const lines = stdout.split('\n')
+    let currentWorktreePath: string | null = null
+    let currentBranch: string | null = null
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+
+      if (line.startsWith('worktree ')) {
+        currentWorktreePath = line.replace('worktree ', '').trim()
+      } else if (line.startsWith('branch refs/heads/')) {
+        currentBranch = line.replace('branch refs/heads/', '').trim()
+
+        // If we found the matching branch, return the info
+        if (currentBranch === branchName && currentWorktreePath) {
+          return {
+            worktreePath: currentWorktreePath,
+            branch: currentBranch,
+          }
+        }
+      } else if (line === '') {
+        // Empty line indicates end of worktree entry, reset
+        currentWorktreePath = null
+        currentBranch = null
+      }
+    }
+
+    return null
+  } catch (error) {
+    console.error('Error getting worktree info from git:', error)
+    return null
+  }
+}
+
+// Get list of branch names that have active worktrees (using git directly)
+ipcMain.handle('get-worktree-branches', async (event, projectPath) => {
+  try {
+    const { stdout } = await execAsync('git worktree list --porcelain', {
+      cwd: projectPath,
+    })
+
+    const branches: string[] = []
+    const lines = stdout.split('\n')
+
+    for (const line of lines) {
+      if (line.startsWith('branch refs/heads/')) {
+        const branchName = line.replace('branch refs/heads/', '').trim()
+        branches.push(branchName)
+      }
+    }
+
+    console.log('Found worktree branches:', branches)
+
+    return {
+      success: true,
+      branches,
+    }
+  } catch (error: any) {
+    console.error('Error getting worktree branches:', error)
+    return {
+      success: false,
+      error: error.message,
+      branches: [],
+    }
+  }
+})
+
 // Get list of existing worktrees for a project
 ipcMain.handle('get-project-worktrees', async (event, projectPath) => {
   try {
@@ -1471,6 +1304,369 @@ ipcMain.handle('get-project-worktrees', async (event, projectPath) => {
   }
 })
 
+// Perform worktree merge with auto-commit and cleanup
+ipcMain.handle(
+  'perform-worktree-merge',
+  async (event, { projectPath, sourceBranch, targetBranch }) => {
+    try {
+      console.log('Starting worktree merge:', {
+        projectPath,
+        sourceBranch,
+        targetBranch,
+      })
+
+      // Step 1: Get worktree information from git directly
+      const worktreeInfo = await getWorktreeInfoFromGit(projectPath, sourceBranch)
+
+      if (!worktreeInfo) {
+        throw new Error(`Worktree for branch ${sourceBranch} not found`)
+      }
+
+      const worktreePath = worktreeInfo.worktreePath
+
+      // Try to get the prompt text from conversation history for commit message
+      let promptText = sourceBranch // Default to branch name
+      try {
+        const { conversationsDir } = ensureProjectFolderStructure(projectPath)
+        const conversationFiles = readdirSync(conversationsDir).filter(file =>
+          file.endsWith('.json')
+        )
+
+        for (const file of conversationFiles) {
+          try {
+            const promptId = file.replace('.json', '')
+            const prompt = loadEnhancedPromptHistory(projectPath).find(
+              p => p.id === promptId && p.branch === sourceBranch
+            )
+
+            if (prompt) {
+              promptText = prompt.prompt
+              break
+            }
+          } catch (error) {
+            // Continue searching
+          }
+        }
+      } catch (error) {
+        console.warn('Could not load prompt text from history, using branch name')
+      }
+
+      console.log('Found worktree:', { worktreePath, promptText })
+
+      // Step 2: Check for uncommitted changes in worktree
+      const { stdout: statusOutput } = await execAsync('git status --porcelain', {
+        cwd: worktreePath,
+      })
+
+      // Step 3: Auto-commit if there are uncommitted changes
+      if (statusOutput.trim()) {
+        console.log('Auto-committing changes in worktree...')
+        await execAsync('git add .', { cwd: worktreePath })
+
+        // Format commit message: almondcoder: <prompt text>
+        const commitMessage = `almondcoder: ${promptText}`
+        const escapedMessage = commitMessage.replace(/"/g, '\\"')
+
+        await execAsync(`git commit -m "${escapedMessage}"`, {
+          cwd: worktreePath,
+        })
+        console.log('Changes committed with message:', commitMessage)
+      } else {
+        console.log('No uncommitted changes in worktree')
+      }
+
+      // Step 4: Get current branch in main repo
+      const { stdout: currentBranch } = await execAsync(
+        'git rev-parse --abbrev-ref HEAD',
+        { cwd: projectPath }
+      )
+      const currentBranchName = currentBranch.trim()
+
+      // Step 5: Stash any uncommitted changes in main repo
+      let hasStashedMainRepo = false
+      const { stdout: mainRepoStatus } = await execAsync(
+        'git status --porcelain',
+        { cwd: projectPath }
+      )
+
+      if (mainRepoStatus.trim()) {
+        console.log('Stashing uncommitted changes in main repo...')
+        await execAsync('git stash push -u -m "almondcoder-temp-stash"', {
+          cwd: projectPath,
+        })
+        hasStashedMainRepo = true
+      }
+
+      try {
+        // Step 6: Checkout target branch in main repo
+        if (currentBranchName !== targetBranch) {
+          console.log(`Checking out target branch: ${targetBranch}`)
+          await execAsync(`git checkout ${targetBranch}`, { cwd: projectPath })
+        }
+
+        // Step 7: Merge the worktree branch
+        console.log(`Merging ${sourceBranch} into ${targetBranch}`)
+        try {
+          await execAsync(`git merge ${sourceBranch} --no-ff`, {
+            cwd: projectPath,
+          })
+        } catch (mergeError: any) {
+          // Check if this is a merge conflict
+          if (mergeError.stdout && mergeError.stdout.includes('CONFLICT')) {
+            console.log('Merge conflicts detected, parsing conflicts...')
+
+            // Get list of conflicted files
+            const { stdout: statusOutput } = await execAsync('git status --porcelain', {
+              cwd: projectPath,
+            })
+
+            const conflictedFiles = statusOutput
+              .split('\n')
+              .filter(line => line.startsWith('UU ') || line.startsWith('AA '))
+              .map(line => line.substring(3).trim())
+
+            console.log('Conflicted files:', conflictedFiles)
+
+            // Parse conflicts for each file with full content
+            const conflicts = []
+            for (const file of conflictedFiles) {
+              try {
+                const filePath = join(projectPath, file)
+                const fullContent = readFileSync(filePath, 'utf8')
+                const lines = fullContent.split('\n')
+
+                // Find all conflicts in this file
+                const fileConflicts = []
+                let conflictIndex = 0
+
+                for (let i = 0; i < lines.length; i++) {
+                  if (lines[i].startsWith('<<<<<<< ')) {
+                    const startLine = i
+                    let currentContent = ''
+                    let incomingContent = ''
+                    let endLine = i
+                    let mode = 'current'
+
+                    // Parse this conflict
+                    for (let j = i + 1; j < lines.length; j++) {
+                      if (lines[j].startsWith('=======')) {
+                        mode = 'incoming'
+                      } else if (lines[j].startsWith('>>>>>>>')) {
+                        endLine = j
+                        break
+                      } else {
+                        if (mode === 'current') {
+                          currentContent += lines[j] + '\n'
+                        } else {
+                          incomingContent += lines[j] + '\n'
+                        }
+                      }
+                    }
+
+                    fileConflicts.push({
+                      id: `${file}-${conflictIndex}`,
+                      startLine: startLine + 1, // 1-indexed for display
+                      endLine: endLine + 1,
+                      currentContent: currentContent.trim(),
+                      incomingContent: incomingContent.trim(),
+                    })
+
+                    conflictIndex++
+                    i = endLine // Skip to end of this conflict
+                  }
+                }
+
+                // Add file with all its conflicts
+                if (fileConflicts.length > 0) {
+                  conflicts.push({
+                    file,
+                    fullContent,
+                    currentBranch: targetBranch,
+                    incomingBranch: sourceBranch,
+                    conflicts: fileConflicts,
+                  })
+                }
+              } catch (fileError) {
+                console.error(`Error parsing conflict in ${file}:`, fileError)
+              }
+            }
+
+            // Return conflict information without aborting
+            return {
+              success: false,
+              hasConflicts: true,
+              conflicts,
+              sourceBranch,
+              targetBranch,
+              worktreePath,
+              hasStashedMainRepo,
+            }
+          }
+
+          // Not a conflict error, throw it
+          throw mergeError
+        }
+
+        // Step 8: Cleanup - Remove worktree and delete branch
+        console.log('Cleaning up worktree and branch...')
+        await execAsync(`git worktree remove "${worktreePath}"`, {
+          cwd: projectPath,
+        })
+        await execAsync(`git branch -d ${sourceBranch}`, { cwd: projectPath })
+
+        // Step 9: Pop stash if we stashed
+        if (hasStashedMainRepo) {
+          try {
+            await execAsync('git stash pop', { cwd: projectPath })
+            console.log('Restored stashed changes')
+          } catch (popError) {
+            console.warn('Could not pop stash:', popError)
+          }
+        }
+
+        console.log('Merge completed successfully')
+        return { success: true }
+      } catch (mergeError: any) {
+        // Restore stash if merge failed
+        if (hasStashedMainRepo) {
+          try {
+            await execAsync('git stash pop', { cwd: projectPath })
+          } catch (popError) {
+            console.warn('Could not restore stash after error:', popError)
+          }
+        }
+        throw mergeError
+      }
+    } catch (error: any) {
+      console.error('Error performing worktree merge:', error)
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+  }
+)
+
+// Complete worktree merge after conflicts are resolved
+ipcMain.handle(
+  'complete-worktree-merge',
+  async (event, { projectPath, sourceBranch, worktreePath, resolutions, hasStashedMainRepo }) => {
+    try {
+      console.log('Completing worktree merge with resolutions...')
+
+      // Step 1: Write resolved contents to files
+      for (const resolution of resolutions) {
+        const filePath = join(projectPath, resolution.file)
+        writeFileSync(filePath, resolution.content, 'utf8')
+        console.log(`Wrote resolution for ${resolution.file}`)
+      }
+
+      // Step 2: Stage resolved files
+      await execAsync('git add .', { cwd: projectPath })
+
+      // Step 3: Complete the merge commit
+      await execAsync('git commit --no-edit', { cwd: projectPath })
+      console.log('Merge commit completed')
+
+      // Step 4: Cleanup - Remove worktree and delete branch
+      console.log('Cleaning up worktree and branch...')
+      await execAsync(`git worktree remove "${worktreePath}"`, {
+        cwd: projectPath,
+      })
+      await execAsync(`git branch -d ${sourceBranch}`, { cwd: projectPath })
+
+      // Step 5: Pop stash if we stashed
+      if (hasStashedMainRepo) {
+        try {
+          await execAsync('git stash pop', { cwd: projectPath })
+          console.log('Restored stashed changes')
+        } catch (popError) {
+          console.warn('Could not pop stash:', popError)
+        }
+      }
+
+      console.log('Merge completed successfully')
+      return { success: true }
+    } catch (error: any) {
+      console.error('Error completing worktree merge:', error)
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+  }
+)
+
+// Abort worktree merge
+ipcMain.handle(
+  'abort-worktree-merge',
+  async (event, { projectPath, hasStashedMainRepo }) => {
+    try {
+      console.log('Aborting worktree merge...')
+
+      // Abort the merge
+      await execAsync('git merge --abort', { cwd: projectPath })
+
+      // Pop stash if we stashed
+      if (hasStashedMainRepo) {
+        try {
+          await execAsync('git stash pop', { cwd: projectPath })
+          console.log('Restored stashed changes')
+        } catch (popError) {
+          console.warn('Could not pop stash:', popError)
+        }
+      }
+
+      console.log('Merge aborted successfully')
+      return { success: true }
+    } catch (error: any) {
+      console.error('Error aborting worktree merge:', error)
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+  }
+)
+
+// Discard worktree changes - delete worktree and branch
+ipcMain.handle(
+  'discard-worktree-changes',
+  async (event, { projectPath, sourceBranch }) => {
+    try {
+      console.log('Discarding worktree changes for branch:', sourceBranch)
+
+      // Step 1: Get worktree information from git directly
+      const worktreeInfo = await getWorktreeInfoFromGit(projectPath, sourceBranch)
+
+      if (!worktreeInfo) {
+        throw new Error(`Worktree for branch ${sourceBranch} not found`)
+      }
+
+      const worktreePath = worktreeInfo.worktreePath
+
+      // Step 2: Force remove worktree (including uncommitted changes)
+      console.log('Removing worktree:', worktreePath)
+      await execAsync(`git worktree remove --force "${worktreePath}"`, {
+        cwd: projectPath,
+      })
+
+      // Step 3: Force delete branch
+      console.log('Deleting branch:', sourceBranch)
+      await execAsync(`git branch -D ${sourceBranch}`, { cwd: projectPath })
+
+      console.log('Worktree and branch discarded successfully')
+      return { success: true }
+    } catch (error: any) {
+      console.error('Error discarding worktree changes:', error)
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+  }
+)
+
 // Helper function to detect default terminal on macOS
 async function getMacOSDefaultTerminal(): Promise<string | null> {
   // Check for popular terminal apps in order of preference
@@ -1488,9 +1684,7 @@ async function getMacOSDefaultTerminal(): Promise<string | null> {
       // Check if the application exists
       await execAsync(`osascript -e 'exists application "${terminal.app}"'`)
       return terminal.app
-    } catch {
-      continue
-    }
+    } catch {}
   }
 
   return 'Terminal' // Fallback to default Terminal.app
@@ -1563,7 +1757,9 @@ async function openWindowsTerminal(terminal: string, path: string) {
     await execAsync(`start pwsh.exe -NoExit -Command "Set-Location '${path}'"`)
   } else if (terminal === 'powershell') {
     // Windows PowerShell
-    await execAsync(`start powershell.exe -NoExit -Command "Set-Location '${path}'"`)
+    await execAsync(
+      `start powershell.exe -NoExit -Command "Set-Location '${path}'"`
+    )
   } else {
     // cmd.exe
     await execAsync(`start cmd.exe /K "cd /d ${path}"`)
@@ -1587,7 +1783,9 @@ async function getLinuxDefaultTerminal(): Promise<string | null> {
 
   // Try to get default from xdg-mime
   try {
-    const { stdout } = await execAsync('xdg-mime query default x-scheme-handler/terminal 2>/dev/null')
+    const { stdout } = await execAsync(
+      'xdg-mime query default x-scheme-handler/terminal 2>/dev/null'
+    )
     if (stdout.trim()) {
       // Extract terminal name from .desktop file
       const desktopFile = stdout.trim()
@@ -1614,9 +1812,7 @@ async function getLinuxDefaultTerminal(): Promise<string | null> {
     try {
       await execAsync(`which ${terminal} 2>/dev/null`)
       return terminal
-    } catch {
-      continue
-    }
+    } catch {}
   }
 
   return null
@@ -1784,15 +1980,59 @@ ipcMain.handle(
   }
 )
 
+// ============================================================================
+// Auto-Accept State Update IPC Handler
+// ============================================================================
+// LOGIC: When user toggles the auto-accept switch in the UI, this handler
+// immediately updates the in-memory cache so the running canUseTool callback
+// uses the fresh value instead of the stale closure value.
+ipcMain.on(
+  'update-auto-accept-state',
+  (event, data: { promptId: string; enabled: boolean }) => {
+    console.log(
+      `📥 [IPC] Received auto-accept update for conversation ${data.promptId}: ${data.enabled}`
+    )
+    updateAutoAcceptState(data.promptId, data.enabled)
+  }
+)
+
+// ============================================================================
+// Conversation State IPC Handlers
+// ============================================================================
+// LOGIC: Minimal IPC for conversation state management
+// - GET ALL: Load all conversation states once on mount
+// - UPDATE ONE: Update state when renderer triggers changes (e.g., Accept button)
+// - BROADCAST: Main process auto-broadcasts changes via 'conversation-state-changed'
+
+// GET ALL conversation states (called once on mount)
+ipcMain.handle('get-all-conversation-states', () => {
+  const states = getAllConversationStates()
+  console.log(`📥 [IPC] Returning ${states.length} conversation states`)
+  return states
+})
+
+// UPDATE ONE conversation state (called from renderer for UI-triggered changes)
+ipcMain.on(
+  'update-conversation-state',
+  (event, data: { promptId: string; updates: Partial<ConversationState> }) => {
+    console.log(
+      `📥 [IPC] Updating conversation state for ${data.promptId}:`,
+      data.updates
+    )
+    updateConversationState(data.promptId, data.updates)
+  }
+)
+
 let tray: Tray | null = null
 
 makeAppWithSingleInstanceLock(async () => {
   await app.whenReady()
 
   // Create tray icon
-  const trayIconPath = join(__dirname, '../resources/public/logo.svg')
+  const trayIconPath = join(app.getAppPath(), 'src/resources/public/trayIconTemplate.png')
   const trayIcon = nativeImage.createFromPath(trayIconPath)
-  tray = new Tray(trayIcon.resize({ width: 16, height: 16 }))
+  trayIcon.setTemplateImage(true) // Enable macOS template mode
+  tray = new Tray(trayIcon)
 
   const contextMenu = Menu.buildFromTemplate([
     {

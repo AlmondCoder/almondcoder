@@ -2,7 +2,7 @@
   "displayName": "AlmondCoder",
   "name": "almondcoder",
   "description": "AI-powered coding assistant with Git integration",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "main": "./node_modules/.dev/main/index.js",
   "resources": "src/resources",
   "author": {

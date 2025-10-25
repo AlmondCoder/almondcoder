@@ -21,9 +21,6 @@ export function CloneRepositoryModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    
-
-
     setIsLoading(true)
     setError('')
 

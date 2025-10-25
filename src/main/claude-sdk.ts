@@ -7,6 +7,140 @@ import type { BrowserWindow } from 'electron'
 import { ipcMain } from 'electron'
 
 // ============================================================================
+// In-Memory Cache for Auto-Accept State
+// ============================================================================
+// LOGIC: Store auto-accept state per conversation in memory so it can be
+// updated in real-time when user toggles during an active conversation.
+// This avoids stale closure values and expensive disk reads.
+const autoAcceptCache = new Map<string, boolean>()
+
+// ============================================================================
+// In-Memory Cache for Conversation State
+// ============================================================================
+// LOGIC: Store conversation state (running, waiting, completed, error) per
+// conversation. Main process updates this automatically during SDK execution
+// and broadcasts changes to renderer for real-time UI updates.
+export interface ConversationState {
+  promptId: string
+  status: 'idle' | 'running' | 'waiting_permission' | 'completed' | 'error'
+  sessionId?: string
+  pendingPermission?: {
+    requestId: string
+    toolName: string
+    toolInput: any
+  }
+  error?: string
+  lastUpdated: number
+}
+
+const conversationStateCache = new Map<string, ConversationState>()
+
+/**
+ * Update the auto-accept state for a specific conversation
+ * Called via IPC when user toggles the auto-accept switch
+ */
+export function updateAutoAcceptState(promptId: string, enabled: boolean) {
+  autoAcceptCache.set(promptId, enabled)
+  console.log(
+    `✅ [AutoAccept Cache] Updated for conversation ${promptId}: ${enabled}`
+  )
+}
+
+/**
+ * Get the current auto-accept state for a conversation
+ */
+function getAutoAcceptState(
+  promptId: string | undefined,
+  fallback: boolean
+): boolean {
+  if (!promptId) return fallback
+  return autoAcceptCache.get(promptId) ?? fallback
+}
+
+/**
+ * Clear auto-accept state from cache when conversation completes
+ */
+function clearAutoAcceptState(promptId: string | undefined) {
+  if (promptId) {
+    autoAcceptCache.delete(promptId)
+    console.log(`🧹 [AutoAccept Cache] Cleared for conversation ${promptId}`)
+  }
+}
+
+// ============================================================================
+// Conversation State Management Functions
+// ============================================================================
+
+/**
+ * Update conversation state and broadcast to all renderer windows
+ * Called automatically by main process during SDK execution
+ */
+export function updateConversationState(
+  promptId: string,
+  updates: Partial<ConversationState>,
+  broadcast = true
+) {
+  const existing = conversationStateCache.get(promptId) || {
+    promptId,
+    status: 'idle' as const,
+    lastUpdated: Date.now(),
+  }
+
+  const updated: ConversationState = {
+    ...existing,
+    ...updates,
+    promptId, // Ensure promptId is always set
+    lastUpdated: Date.now(),
+  }
+
+  conversationStateCache.set(promptId, updated)
+  console.log(
+    `📡 [State] Updated ${promptId}: ${updated.status}${updates.error ? ` (${updates.error})` : ''}`
+  )
+
+  // Broadcast to all renderer windows
+  if (broadcast) {
+    const { BrowserWindow } = require('electron')
+    BrowserWindow.getAllWindows().forEach((win: BrowserWindow) => {
+      win.webContents.send('conversation-state-changed', updated)
+    })
+  }
+}
+
+/**
+ * Get conversation state for a specific prompt
+ */
+export function getConversationState(
+  promptId: string
+): ConversationState | undefined {
+  return conversationStateCache.get(promptId)
+}
+
+/**
+ * Get all conversation states
+ */
+export function getAllConversationStates(): ConversationState[] {
+  return Array.from(conversationStateCache.values())
+}
+
+/**
+ * Clear conversation state and notify renderer
+ */
+export function clearConversationState(promptId: string) {
+  conversationStateCache.delete(promptId)
+  console.log(`🧹 [State] Cleared conversation state for ${promptId}`)
+
+  // Broadcast deletion
+  const { BrowserWindow } = require('electron')
+  BrowserWindow.getAllWindows().forEach((win: BrowserWindow) => {
+    win.webContents.send('conversation-state-changed', {
+      promptId,
+      deleted: true,
+    })
+  })
+}
+
+// ============================================================================
 // ClaudeSDKOptions Interface
 // ============================================================================
 // LOGIC: We need to pass additional context to the SDK execution function
@@ -50,6 +184,29 @@ export async function executeClaudeQuery(
     autoAcceptEnabled,
   })
 
+  // ============================================================================
+  // Initialize Auto-Accept Cache
+  // ============================================================================
+  // LOGIC: Store the initial auto-accept value in cache. This allows the value
+  // to be updated mid-conversation via IPC without closure staleness issues.
+  if (promptId) {
+    autoAcceptCache.set(promptId, autoAcceptEnabled)
+    console.log(
+      `📝 [AutoAccept Cache] Initialized for ${promptId}: ${autoAcceptEnabled}`
+    )
+  }
+
+  // ============================================================================
+  // Initialize Conversation State
+  // ============================================================================
+  // LOGIC: Mark conversation as 'running' and broadcast to renderer
+  if (promptId) {
+    updateConversationState(promptId, {
+      status: 'running',
+      sessionId: resume,
+    })
+  }
+
   let messageCount = 0
 
   // ============================================================================
@@ -65,10 +222,18 @@ export async function executeClaudeQuery(
   // 4. Return PermissionResult to SDK which continues or blocks the tool
   const canUseTool: CanUseTool = async (toolName, toolInput, { signal }) => {
     console.log(`🔒 [Permission] Tool "${toolName}" requesting permission`)
-    console.log(`   Auto-accept enabled: ${autoAcceptEnabled}`)
+
+    // ============================================================================
+    // ✅ FIX: Read from in-memory cache instead of stale closure
+    // ============================================================================
+    // LOGIC: Instead of using the captured `autoAcceptEnabled` value from closure
+    // (which never changes during the conversation), we read from the cache which
+    // gets updated in real-time when the user toggles the switch.
+    const currentAutoAccept = getAutoAcceptState(promptId, autoAcceptEnabled)
+    console.log(`   Auto-accept enabled (from cache): ${currentAutoAccept}`)
 
     // FAST PATH: If auto-accept is enabled, immediately allow without asking
-    if (autoAcceptEnabled) {
+    if (currentAutoAccept) {
       console.log(
         `✅ [Permission] Auto-accept enabled, allowing "${toolName}" immediately`
       )
@@ -95,32 +260,26 @@ export async function executeClaudeQuery(
       timestamp: Date.now(),
     })
 
+    // ✅ Update conversation state to 'waiting_permission'
+    if (promptId) {
+      updateConversationState(promptId, {
+        status: 'waiting_permission',
+        pendingPermission: {
+          requestId,
+          toolName,
+          toolInput,
+        },
+      })
+    }
+
     // ============================================================================
     // Wait for User Response (Accept or Cancel)
     // ============================================================================
     // LOGIC: We create a Promise that will be resolved when the user either:
     // 1. Clicks "Accept" button → resolve with 'allow'
     // 2. Types a new prompt → resolve with 'deny' + new prompt message
-    // 3. Timeout (10m) → resolve with 'deny' + timeout message
+    // NOTE: No timeout - permission request waits indefinitely until user responds
     return new Promise<PermissionResult>((resolve, reject) => {
-      // Timeout: Auto-deny after 10 minutes to prevent hanging
-      const timeout = setTimeout(() => {
-        cleanup()
-        console.log(
-          `⏰ [Permission] Request ${requestId} timed out after 10 minutes`
-        )
-
-        // Notify renderer that this request timed out
-        sender.send('tool-permission-timeout', { requestId })
-
-        // Deny the tool execution
-        resolve({
-          behavior: 'deny',
-          message:
-            'Permission request timed out (10 minutes). Please try again.',
-        })
-      }, 600000) // 10 minute timeout
-
       // ============================================================================
       // Listen for Accept Response
       // ============================================================================
@@ -132,6 +291,14 @@ export async function executeClaudeQuery(
         console.log(
           `✅ [Permission] User accepted "${toolName}" for request ${requestId}`
         )
+
+        // ✅ Update conversation state back to 'running'
+        if (promptId) {
+          updateConversationState(promptId, {
+            status: 'running',
+            pendingPermission: undefined,
+          })
+        }
 
         // Allow the tool to execute
         resolve({ behavior: 'allow', updatedInput: toolInput })
@@ -163,9 +330,8 @@ export async function executeClaudeQuery(
       // ============================================================================
       // Cleanup Function
       // ============================================================================
-      // LOGIC: Remove event listeners and timeout when we get a response
+      // LOGIC: Remove event listeners when we get a response
       const cleanup = () => {
-        clearTimeout(timeout)
         ipcMain.removeListener('tool-permission-accept', acceptListener)
         ipcMain.removeListener('tool-permission-cancel', cancelListener)
       }
@@ -232,13 +398,23 @@ export async function executeClaudeQuery(
         rawData: false, // This is JSON, not ANSI
         promptId: promptId, // Identify which conversation this message belongs to
       })
-
-      
     }
 
     console.log(
       `✅ Claude SDK query completed successfully (${messageCount} messages)`
     )
+
+    // ============================================================================
+    // Cleanup and Mark as Completed
+    // ============================================================================
+    // LOGIC: Remove caches and mark conversation as completed
+    clearAutoAcceptState(promptId)
+
+    if (promptId) {
+      updateConversationState(promptId, { status: 'completed' })
+      // Clear from cache after a short delay to allow UI to update
+      setTimeout(() => clearConversationState(promptId), 1000)
+    }
   } catch (error) {
     console.error('❌ Error during Claude SDK query:', error)
     console.error(`   Streamed ${messageCount} messages before error`)
@@ -263,7 +439,25 @@ export async function executeClaudeQuery(
       console.log(
         '⚠️  Process exited with code 1, but messages were received. Treating as success.'
       )
+      // Cleanup cache even on partial success
+      clearAutoAcceptState(promptId)
+
+      if (promptId) {
+        updateConversationState(promptId, { status: 'completed' })
+        setTimeout(() => clearConversationState(promptId), 1000)
+      }
       return
+    }
+
+    // Cleanup cache and mark as error
+    clearAutoAcceptState(promptId)
+
+    if (promptId) {
+      updateConversationState(promptId, {
+        status: 'error',
+        error: errorMessage,
+      })
+      setTimeout(() => clearConversationState(promptId), 3000)
     }
 
     throw error

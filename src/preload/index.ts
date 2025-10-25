@@ -17,6 +17,8 @@ declare global {
 const API = {
   sayHelloFromBridge: () => console.log('\nHello from bridgeAPI! 👋\n\n'),
   username: process.env.USER,
+  setWindowTitle: (title: string) =>
+    ipcRenderer.invoke('set-window-title', title),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getRecentProjects: () => ipcRenderer.invoke('get-recent-projects'),
   getAppDataPath: () => ipcRenderer.invoke('get-app-data-path'),
@@ -86,6 +88,30 @@ const API = {
     ipcRenderer.invoke('cleanup-worktree', worktreePath),
   validateWorktree: (worktreePath: string) =>
     ipcRenderer.invoke('validate-worktree', worktreePath),
+  getProjectWorktrees: (projectPath: string) =>
+    ipcRenderer.invoke('get-project-worktrees', projectPath),
+  getWorktreeBranches: (projectPath: string) =>
+    ipcRenderer.invoke('get-worktree-branches', projectPath),
+  performWorktreeMerge: (params: {
+    projectPath: string
+    sourceBranch: string
+    targetBranch: string
+  }) => ipcRenderer.invoke('perform-worktree-merge', params),
+  completeWorktreeMerge: (params: {
+    projectPath: string
+    sourceBranch: string
+    worktreePath: string
+    resolutions: Array<{ file: string; content: string }>
+    hasStashedMainRepo: boolean
+  }) => ipcRenderer.invoke('complete-worktree-merge', params),
+  abortWorktreeMerge: (params: {
+    projectPath: string
+    hasStashedMainRepo: boolean
+  }) => ipcRenderer.invoke('abort-worktree-merge', params),
+  discardWorktreeChanges: (params: {
+    projectPath: string
+    sourceBranch: string
+  }) => ipcRenderer.invoke('discard-worktree-changes', params),
   openTerminalAtPath: (path: string) =>
     ipcRenderer.invoke('open-terminal-at-path', path),
   // ============================================================================
@@ -146,26 +172,11 @@ const API = {
   },
 
   /**
-   * Listen for permission request timeouts
-   * LOGIC: If user doesn't respond within 10 minutes, main process sends timeout event
-   */
-  onToolPermissionTimeout: (
-    callback: (data: { requestId: string }) => void
-  ) => {
-    const handler = (_event: any, data: { requestId: string }) => {
-      callback(data)
-    }
-    ipcRenderer.on('tool-permission-timeout', handler)
-    return handler
-  },
-
-  /**
    * Remove permission event listeners
    * LOGIC: Cleanup when component unmounts
    */
   removeToolPermissionListeners: () => {
     ipcRenderer.removeAllListeners('tool-permission-pending')
-    ipcRenderer.removeAllListeners('tool-permission-timeout')
   },
 
   /**
@@ -185,6 +196,62 @@ const API = {
   cancelToolPermission: (data: { requestId: string; newPrompt: string }) => {
     console.log('🔌 [Preload] Sending tool-permission-cancel:', data.requestId)
     ipcRenderer.send('tool-permission-cancel', data)
+  },
+
+  /**
+   * Update auto-accept state for a conversation
+   * LOGIC: When user toggles the auto-accept switch, immediately notify main process
+   * to update the in-memory cache so canUseTool uses the fresh value
+   */
+  updateAutoAcceptState: (data: { promptId: string; enabled: boolean }) => {
+    console.log(
+      '🔌 [Preload] Sending update-auto-accept-state:',
+      data.promptId,
+      '=',
+      data.enabled
+    )
+    ipcRenderer.send('update-auto-accept-state', data)
+  },
+
+  // ============================================================================
+  // Conversation State Management API
+  // ============================================================================
+  // Minimal IPC API: GET ALL + UPDATE ONE + LISTEN for broadcasts
+
+  /**
+   * Get all conversation states (called once on mount)
+   */
+  getAllConversationStates: () => {
+    return ipcRenderer.invoke('get-all-conversation-states')
+  },
+
+  /**
+   * Update conversation state (renderer-triggered, e.g., Accept button)
+   */
+  updateConversationState: (data: { promptId: string; updates: any }) => {
+    console.log(
+      '🔌 [Preload] Sending update-conversation-state:',
+      data.promptId,
+      data.updates
+    )
+    ipcRenderer.send('update-conversation-state', data)
+  },
+
+  /**
+   * Listen for conversation state changes from main process
+   * LOGIC: Main process broadcasts state updates, renderer listens and updates UI
+   * Returns cleanup function to remove listener
+   */
+  onConversationStateChanged: (callback: (state: any) => void) => {
+    const handler = (_event: any, state: any) => {
+      callback(state)
+    }
+    ipcRenderer.on('conversation-state-changed', handler)
+
+    // Return cleanup function
+    return () => {
+      ipcRenderer.removeListener('conversation-state-changed', handler)
+    }
   },
 }
 

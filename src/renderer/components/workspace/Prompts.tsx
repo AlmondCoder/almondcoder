@@ -8,7 +8,7 @@ import {
   Brain,
   Info,
   Terminal,
-  Keyboard
+  Keyboard,
 } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import { AgentView } from './AgentView'
@@ -61,7 +61,76 @@ export function Prompts({ projectContext }: PromptsProps) {
     Map<string, BusyConversation>
   >(new Map())
 
+  // Track token usage per conversation
+  const [conversationTokenUsage, setConversationTokenUsage] = useState<
+    Map<string, { inputTokens: number; outputTokens: number; model?: string }>
+  >(new Map())
+
   const [availableBranches, setAvailableBranches] = useState<string[]>([])
+
+  // Load all conversation states from main process on mount
+  useEffect(() => {
+    const loadConversationStates = async () => {
+      try {
+        const states = await window.App.getAllConversationStates()
+        const statesMap = new Map<string, BusyConversation>()
+
+        states.forEach((state: any) => {
+          statesMap.set(state.promptId, {
+            conversation: { promptId: state.promptId } as any,
+            status: state.status,
+            sessionId: state.sessionId,
+            pendingPermission: state.pendingPermission,
+            error: state.error,
+          })
+        })
+
+        setBusyConversations(statesMap)
+        console.log(`📥 Loaded ${states.length} conversation states from cache`)
+      } catch (error) {
+        console.error('❌ Failed to load conversation states:', error)
+      }
+    }
+
+    loadConversationStates()
+  }, [])
+
+  // Listen for real-time conversation state updates from main process
+  useEffect(() => {
+    const unsubscribe = window.App.onConversationStateChanged((state: any) => {
+      console.log(
+        `🔔 State changed: ${state.promptId} → ${state.deleted ? 'deleted' : state.status}`
+      )
+
+      if (state.deleted) {
+        // Remove from map
+        setBusyConversations(prev => {
+          const newMap = new Map(prev)
+          newMap.delete(state.promptId)
+          return newMap
+        })
+      } else {
+        // Update or add to map
+        setBusyConversations(prev => {
+          const newMap = new Map(prev)
+          const existing = newMap.get(state.promptId)
+
+          newMap.set(state.promptId, {
+            conversation:
+              existing?.conversation || ({ promptId: state.promptId } as any),
+            status: state.status,
+            sessionId: state.sessionId,
+            pendingPermission: state.pendingPermission,
+            error: state.error,
+          })
+
+          return newMap
+        })
+      }
+    })
+
+    return () => unsubscribe()
+  }, [])
 
   // Helper function to load and process prompt history
   const loadAndProcessPromptHistory = async (projectPath: string) => {
@@ -78,7 +147,10 @@ export function Prompts({ projectContext }: PromptsProps) {
           const timeSinceCompletion = nowEpoch - updatedAtEpoch
 
           // If prompt is completed and more than 5 minutes old, mark as 'old'
-          if (item.status === 'completed' && timeSinceCompletion > fiveMinutesInMs) {
+          if (
+            item.status === 'completed' &&
+            timeSinceCompletion > fiveMinutesInMs
+          ) {
             // Update status in database
             try {
               await window.App.updateEnhancedPrompt({
@@ -115,12 +187,14 @@ export function Prompts({ projectContext }: PromptsProps) {
   }
 
   // Agent management state
-  const [viewMode, setViewMode] = useState<'prompts' | 'agents' | 'memory'>('prompts')
+  const [viewMode, setViewMode] = useState<'prompts' | 'agents' | 'memory'>(
+    'prompts'
+  )
   const [conversationViewMode, setConversationViewMode] = useState<
     'conversation' | 'diff'
   >('conversation')
 
-  // Context usage tracking (mock data for now - will be replaced with actual values)
+  // Context usage tracking - real calculation from conversation token data
   const getContextUsage = (): {
     percentage: number
     usedTokens: number
@@ -129,8 +203,21 @@ export function Prompts({ projectContext }: PromptsProps) {
     if (selectedConversation.promptId === '+new') {
       return { percentage: 0, usedTokens: 0, totalTokens: 200000 }
     }
-    // Mock data - replace with actual token counting logic
-    return { percentage: 45, usedTokens: 90000, totalTokens: 200000 }
+
+    // Get token usage for selected conversation
+    const usage = conversationTokenUsage.get(selectedConversation.promptId)
+    if (!usage) {
+      return { percentage: 0, usedTokens: 0, totalTokens: 200000 }
+    }
+
+    const totalTokens = usage.inputTokens + usage.outputTokens
+    const percentage = Math.round((totalTokens / 200000) * 100)
+
+    return {
+      percentage,
+      usedTokens: totalTokens,
+      totalTokens: 200000,
+    }
   }
 
   const [agents, setAgents] = useState<PromptAgent[]>([
@@ -213,6 +300,40 @@ export function Prompts({ projectContext }: PromptsProps) {
     }
   }
 
+  // Get conversation state color and label
+  const getConversationStatusColor = (
+    status: 'idle' | 'running' | 'waiting_permission' | 'completed' | 'error'
+  ) => {
+    const colors = {
+      running: {
+        bg: 'bg-blue-500',
+        label: 'Running',
+        icon: '🔵',
+      },
+      waiting_permission: {
+        bg: 'bg-yellow-500',
+        label: 'Waiting',
+        icon: '🟡',
+      },
+      completed: {
+        bg: 'bg-green-500',
+        label: 'Done',
+        icon: '🟢',
+      },
+      error: {
+        bg: 'bg-red-500',
+        label: 'Error',
+        icon: '🔴',
+      },
+      idle: {
+        bg: 'bg-gray-500',
+        label: 'Idle',
+        icon: '⚪',
+      },
+    }
+    return colors[status] || colors.idle
+  }
+
   const isPromptBusy = (promptId: string | null): boolean => {
     if (!promptId || promptId === '+new') return false
     const prompt = promptHistory.find(p => p.id === promptId)
@@ -255,6 +376,41 @@ export function Prompts({ projectContext }: PromptsProps) {
     return selectedPrompt?.branch || ''
   }
 
+  // Get branch name for context widget
+  const getBranchForWidget = (): string => {
+    if (selectedConversation.promptId === '+new') {
+      return 'No branch selected'
+    }
+    const selectedPrompt = promptHistory.find(
+      p => p.id === selectedConversation.promptId
+    )
+    return selectedPrompt?.branch || 'Unknown branch'
+  }
+
+  // Get model name for context widget
+  const getModelForWidget = (): string => {
+    if (selectedConversation.promptId === '+new') {
+      return 'No model'
+    }
+    const usage = conversationTokenUsage.get(selectedConversation.promptId)
+    if (usage?.model) {
+      // Extract short model name from full identifier
+      // e.g., "global.anthropic.claude-sonnet-4-5-20250929-v1:0" -> "Claude Sonnet 4.5"
+      const modelStr = usage.model
+      if (modelStr.includes('claude-sonnet-4-5')) {
+        return 'Claude Sonnet 4.5'
+      }
+      if (modelStr.includes('claude-sonnet')) {
+        return 'Claude Sonnet'
+      }
+      if (modelStr.includes('claude')) {
+        return 'Claude'
+      }
+      return modelStr
+    }
+    return 'Claude Code'
+  }
+
   return (
     <div
       className={`flex h-full ${themeClasses.bgPrimary} ${themeClasses.textPrimary}`}
@@ -268,10 +424,12 @@ export function Prompts({ projectContext }: PromptsProps) {
           <button
             className={`${
               isLightTheme
-                ? viewMode === 'prompts' && selectedConversation.promptId === '+new'
+                ? viewMode === 'prompts' &&
+                  selectedConversation.promptId === '+new'
                   ? 'bg-white border-gray-300'
                   : 'bg-gray-50 border-transparent hover:bg-white hover:border-gray-300'
-                : viewMode === 'prompts' && selectedConversation.promptId === '+new'
+                : viewMode === 'prompts' &&
+                    selectedConversation.promptId === '+new'
                   ? themeClasses.bgInput +
                     ' border-2 ' +
                     themeClasses.borderFocus
@@ -290,7 +448,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                 className={`w-4 h-4 flex-shrink-0 ${viewMode === 'prompts' && selectedConversation.promptId === '+new' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
               />
               <span
-                className={`text-sm font-medium ${viewMode === 'prompts'  && selectedConversation.promptId === '+new' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
+                className={`text-sm font-medium ${viewMode === 'prompts' && selectedConversation.promptId === '+new' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
               >
                 Create new prompt
               </span>
@@ -349,7 +507,7 @@ export function Prompts({ projectContext }: PromptsProps) {
               setViewMode('memory')
             }}
           >
-          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <Brain
                 className={`w-4 h-4 flex-shrink-0 ${viewMode === 'memory' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
               />
@@ -370,35 +528,44 @@ export function Prompts({ projectContext }: PromptsProps) {
             <>
               <div className="flex items-center gap-2 text-[11px] text-gray-700 mb-3 leading-relaxed">
                 <Info className="w-4 h-4 flex-shrink-0 text-gray-600" />
-                <span>Working in XYZ branch, using model A with Claude Code.</span>
+                <span>
+                  Working in {getBranchForWidget()}, using {getModelForWidget()}{' '}
+                  with Claude Code.
+                </span>
               </div>
               <div className="text-[10px] text-gray-600 mb-2">
-                Context remaining
+                Tokens used
               </div>
               {/* Progress Bar */}
-              <div className="flex items-center gap-[2px]">
-                {Array.from({ length: 20 }).map((_, index) => {
-                  const segmentPercentage = (index + 1) * 5
-                  const isCompleted = segmentPercentage <= 70
-                  return (
-                    <div
-                      className={`h-2 flex-1 ${isCompleted ? 'bg-gray-800' : 'bg-gray-300'}`}
-                      key={index}
-                    />
-                  )
-                })}
-                <span className="text-[10px] text-gray-600 ml-2">70%</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] text-gray-600">0K</span>
+                <div className="flex-1 flex items-center gap-[1px]">
+                  {Array.from({ length: 20 }).map((_, index) => {
+                    const segmentPercentage = (index + 1) * 5
+                    const isCompleted =
+                      segmentPercentage <= getContextUsage().percentage
+                    return (
+                      <div
+                        className={`h-2 flex-1 ${isCompleted ? 'bg-gray-800' : 'bg-gray-300'}`}
+                        key={index}
+                      />
+                    )
+                  })}
+                </div>
+                <span className="text-[9px] text-gray-600 ml-1">
+                  {Math.round(getContextUsage().usedTokens / 1000)}K
+                </span>
               </div>
             </>
           ) : (
             <>
-              <div className={`flex items-center gap-2 text-xs font-medium ${themeClasses.textPrimary} mb-2`}>
-                <Info className={`w-4 h-4 flex-shrink-0 ${themeClasses.textSecondary}`} />
+              <div
+                className={`flex items-center gap-2 text-xs font-medium ${themeClasses.textPrimary} mb-2`}
+              >
+                <Info
+                  className={`w-4 h-4 flex-shrink-0 ${themeClasses.textSecondary}`}
+                />
                 <span>Context Usage</span>
-              </div>
-              <div className={`text-[10px] ${themeClasses.textSecondary} mb-2`}>
-                You have used {getContextUsage().percentage}% of your context
-                history
               </div>
               <div className={`text-[10px] ${themeClasses.textSecondary} mb-2`}>
                 {getContextUsage().usedTokens.toLocaleString()} /{' '}
@@ -407,7 +574,7 @@ export function Prompts({ projectContext }: PromptsProps) {
               {/* Progress Bar */}
               <div className="flex items-center gap-1">
                 <span className={`text-[9px] ${themeClasses.textTertiary}`}>
-                  0
+                  0K
                 </span>
                 <div className="flex-1 flex items-center gap-[1px]">
                   {Array.from({ length: 20 }).map((_, index) => {
@@ -423,7 +590,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                   })}
                 </div>
                 <span className={`text-[9px] ${themeClasses.textTertiary}`}>
-                  100
+                  {Math.round(getContextUsage().usedTokens / 1000)}K
                 </span>
               </div>
             </>
@@ -439,36 +606,64 @@ export function Prompts({ projectContext }: PromptsProps) {
 
         {/* Existing Prompts */}
         <div className="space-y-3">
-          {promptHistory.map(prompt => (
-            <button
-              className={`${selectedConversation.promptId === prompt.id && viewMode === 'prompts' ? themeClasses.bgInput : themeClasses.bgSecondary} rounded-lg p-3 cursor-pointer border-2 ${selectedConversation.promptId === prompt.id && viewMode === 'prompts' ? themeClasses.borderFocus : 'border-transparent'} hover:${themeClasses.bgInput} transition-colors w-full text-left`}
-              key={prompt.id}
-              onClick={async () => {
-                console.log('Selected prompt:', prompt.id)
-                setViewMode('prompts')
+          {promptHistory.map(prompt => {
+            const isActive = selectedConversation.promptId === prompt.id && viewMode === 'prompts'
 
-                // Extract project name from projectPath (e.g., /Users/user/almondcoder/test_git -> test_git)
-                const projectName =
-                  prompt.projectPath.split('/').pop() || 'unknown'
-                const appDataPath = await window.App.getAppDataPath()
-                const conversationLogPath = `${appDataPath}/${projectName}/prompts/conversations/${prompt.id}.json`
+            return (
+              <button
+                className={`relative rounded-lg p-3 cursor-pointer border-2 w-full text-left transition-all duration-200 ${
+                  isActive
+                    ? themeClasses.bgInput + ' ' + themeClasses.borderFocus
+                    : themeClasses.bgSecondary + ' border-transparent hover:' + themeClasses.bgInput
+                }`}
+                key={prompt.id}
+                style={{
+                  borderLeftWidth: isActive ? '4px' : '2px',
+                  borderLeftColor: isActive ? theme.status.info : 'transparent',
+                }}
+                onClick={async () => {
+                  console.log('Selected prompt:', prompt.id)
+                  setViewMode('prompts')
 
-                setSelectedConversation({
-                  promptId: prompt.id,
-                  projectPath: prompt.projectPath,
-                  worktreePath: prompt.worktreePath || '',
-                  aiSessionId: undefined,
-                  conversationLogPath,
-                  createdAt: new Date(prompt.createdAt),
-                  updatedAt: new Date(prompt.updatedAt),
-                })
-              }}
-            >
+                  // Extract project name from projectPath (e.g., /Users/user/almondcoder/test_git -> test_git)
+                  const projectName =
+                    prompt.projectPath.split('/').pop() || 'unknown'
+                  const appDataPath = await window.App.getAppDataPath()
+                  const conversationLogPath = `${appDataPath}/${projectName}/prompts/conversations/${prompt.id}.json`
+
+                  setSelectedConversation({
+                    promptId: prompt.id,
+                    projectPath: prompt.projectPath,
+                    worktreePath: prompt.worktreePath || '',
+                    aiSessionId: undefined,
+                    conversationLogPath,
+                    createdAt: new Date(prompt.createdAt),
+                    updatedAt: new Date(prompt.updatedAt),
+                  })
+                }}
+              >
               <div className="flex items-start gap-2">
-                {/* Status Indicator */}
-                <div
-                  className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 ${getStatusColor(prompt.status)}`}
-                />
+                {/* Enhanced Status Indicator with conversation state overlay */}
+                <div className="relative flex-shrink-0 mt-1">
+                  {/* Base status dot from database */}
+                  <div
+                    className={`w-2 h-2 rounded-full ${getStatusColor(prompt.status)}`}
+                  />
+
+                  {/* Overlay active conversation state if running */}
+                  {busyConversations.get(prompt.id) && (
+                    <div
+                      className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 ${
+                        isLightTheme ? 'border-white' : 'border-gray-900'
+                      } ${getConversationStatusColor(busyConversations.get(prompt.id)!.status).bg} animate-pulse`}
+                      title={
+                        getConversationStatusColor(
+                          busyConversations.get(prompt.id)!.status
+                        ).label
+                      }
+                    />
+                  )}
+                </div>
 
                 <div className="flex-1 min-w-0">
                   {/* Prompt Text - Truncated to 60 chars */}
@@ -490,7 +685,8 @@ export function Prompts({ projectContext }: PromptsProps) {
                 </div>
               </div>
             </button>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -539,20 +735,12 @@ export function Prompts({ projectContext }: PromptsProps) {
           {viewMode === 'prompts' && (
             <div className="flex items-center gap-[10px]">
               {/* Terminal and Keyboard group */}
-              <div className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}>
+              <div
+                className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}
+              >
                 <button
                   className="p-2 text-sm transition-colors flex items-center justify-center"
-                  style={{
-                    backgroundColor: selectedConversation.worktreePath
-                      ? theme.background.tertiary
-                      : theme.background.tertiary,
-                    color: selectedConversation.worktreePath
-                      ? theme.text.primary
-                      : theme.text.muted,
-                    cursor: selectedConversation.worktreePath ? 'pointer' : 'not-allowed',
-                    opacity: selectedConversation.worktreePath ? 1 : 0.6,
-                  }}
-                  title={selectedConversation.worktreePath ? "Open Terminal at Worktree" : "No worktree available"}
+                  disabled={!selectedConversation.worktreePath}
                   onClick={async () => {
                     if (selectedConversation.worktreePath) {
                       const result = await window.App.openTerminalAtPath(
@@ -563,7 +751,23 @@ export function Prompts({ projectContext }: PromptsProps) {
                       }
                     }
                   }}
-                  disabled={!selectedConversation.worktreePath}
+                  style={{
+                    backgroundColor: selectedConversation.worktreePath
+                      ? theme.background.tertiary
+                      : theme.background.tertiary,
+                    color: selectedConversation.worktreePath
+                      ? theme.text.primary
+                      : theme.text.muted,
+                    cursor: selectedConversation.worktreePath
+                      ? 'pointer'
+                      : 'not-allowed',
+                    opacity: selectedConversation.worktreePath ? 1 : 0.6,
+                  }}
+                  title={
+                    selectedConversation.worktreePath
+                      ? 'Open Terminal at Worktree'
+                      : 'No worktree available'
+                  }
                 >
                   <Terminal className="w-4 h-4" />
                 </button>
@@ -584,18 +788,22 @@ export function Prompts({ projectContext }: PromptsProps) {
               </div>
 
               {/* Conversation and Diff group */}
-              <div className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}>
+              <div
+                className={`flex items-center rounded-lg overflow-hidden border ${themeClasses.borderPrimary}`}
+              >
                 <button
                   className="p-2 text-sm transition-colors flex items-center justify-center"
-                  style={{
-                    backgroundColor: conversationViewMode === 'conversation'
-                      ? theme.background.tertiary
-                      : theme.background.primary,
-                    color: conversationViewMode === 'conversation'
-                      ? theme.text.primary
-                      : theme.text.tertiary,
-                  }}
                   onClick={() => setConversationViewMode('conversation')}
+                  style={{
+                    backgroundColor:
+                      conversationViewMode === 'conversation'
+                        ? theme.background.tertiary
+                        : theme.background.primary,
+                    color:
+                      conversationViewMode === 'conversation'
+                        ? theme.text.primary
+                        : theme.text.tertiary,
+                  }}
                   title="Conversation View"
                 >
                   <MessageSquare className="w-4 h-4" />
@@ -606,15 +814,17 @@ export function Prompts({ projectContext }: PromptsProps) {
                 />
                 <button
                   className="p-2 text-sm transition-colors flex items-center justify-center"
-                  style={{
-                    backgroundColor: conversationViewMode === 'diff'
-                      ? theme.background.tertiary
-                      : theme.background.primary,
-                    color: conversationViewMode === 'diff'
-                      ? theme.text.primary
-                      : theme.text.tertiary,
-                  }}
                   onClick={() => setConversationViewMode('diff')}
+                  style={{
+                    backgroundColor:
+                      conversationViewMode === 'diff'
+                        ? theme.background.tertiary
+                        : theme.background.primary,
+                    color:
+                      conversationViewMode === 'diff'
+                        ? theme.text.primary
+                        : theme.text.tertiary,
+                  }}
                   title="Code Difference View"
                 >
                   <GitCompare className="w-4 h-4" />
@@ -641,6 +851,7 @@ export function Prompts({ projectContext }: PromptsProps) {
             busyConversations={busyConversations}
             getAvailableBranchesForNewPrompt={getAvailableBranchesForNewPrompt}
             isPromptBusy={isPromptBusy}
+            loadAndProcessPromptHistory={loadAndProcessPromptHistory}
             newConversation={newConversation}
             projectContext={projectContext}
             promptHistory={promptHistory}
@@ -648,7 +859,17 @@ export function Prompts({ projectContext }: PromptsProps) {
             setBusyConversations={setBusyConversations}
             setPromptHistory={setPromptHistory}
             setSelectedConversation={setSelectedConversation}
-            loadAndProcessPromptHistory={loadAndProcessPromptHistory}
+            onTokenUsageUpdate={(usage) => {
+              setConversationTokenUsage(prev => {
+                const newMap = new Map(prev)
+                newMap.set(selectedConversation.promptId, {
+                  inputTokens: usage.inputTokens,
+                  outputTokens: usage.outputTokens,
+                  model: usage.model,
+                })
+                return newMap
+              })
+            }}
           />
         )}
 

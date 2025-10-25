@@ -200,8 +200,8 @@ export const themes: Record<ThemeName, ColorPalette> = {
 
   light: {
     background: {
-      primary: 'rgb(255 255 255)', // white - main content area
-      secondary: 'rgb(236 236 236)', // light gray - sidebar (from screenshot)
+      primary: '#FAFAF8', // cream/beige - main content area (Overview style)
+      secondary: '#F5F5F0', // light gray - sidebar (Overview style)
       tertiary: 'rgb(243 244 246)', // gray-100 - hover states
       card: 'rgb(255 255 255)', // white
       input: 'rgb(255 255 255)', // white
@@ -209,9 +209,9 @@ export const themes: Record<ThemeName, ColorPalette> = {
       labels: 'rgb(249, 250, 251)', // gray-400/50
     },
     border: {
-      primary: 'rgb(217 217 217)', // lighter gray for subtle borders
+      primary: '#E5E5E0', // subtle gray for borders (Overview style)
       secondary: 'rgba(209, 213, 219, 0.3)', // gray-300/30
-      focus: 'rgb(217 217 217)', //lighter gray for subtle borders
+      focus: '#3B82F6', // blue for focus states
       hover: 'rgba(156, 163, 175, 0.5)', // gray-400/50
     },
     text: {

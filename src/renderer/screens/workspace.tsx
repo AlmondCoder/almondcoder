@@ -24,11 +24,18 @@ export function WorkspaceScreen() {
   useEffect(() => {
     if (projectContext?.projectPath) {
       setCurrentProject(projectContext.projectPath)
+
+      // Set window title to "AlmondCoder - ProjectName"
+      const projectName =
+        projectContext.projectPath.split('/').pop() || 'Project'
+      window.App.setWindowTitle(`AlmondCoder - ${projectName}`)
     }
 
     // Cleanup when leaving workspace
     return () => {
       setCurrentProject(null)
+      // Reset title when leaving workspace
+      window.App.setWindowTitle('AlmondCoder')
     }
   }, [projectContext?.projectPath])
   const [activeSection, setActiveSection] = useState('prompts')
@@ -71,8 +78,7 @@ export function WorkspaceScreen() {
 
   const topMenuItems = [
     { icon: MessageSquare, label: 'Prompts', key: 'prompts' },
-    { icon: GitMerge, label: 'Merge', key: 'merge' },
-    { icon: FolderOpen, label: 'Files', key: 'files' },
+    { icon: GitMerge, label: 'Merge', key: 'merge' }
   ]
 
   const bottomMenuItems = [{ icon: User, label: 'Account', key: 'account' }]
@@ -83,8 +89,6 @@ export function WorkspaceScreen() {
         return <Prompts projectContext={projectContext} />
       case 'merge':
         return <Overview projectContext={projectContext} />
-      case 'files':
-        return <div className="p-4">Files browser coming soon...</div>
       case 'account':
         return <SettingsComponent />
       default:

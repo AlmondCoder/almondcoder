@@ -83,9 +83,7 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
           <Brain
             className={`w-5 h-5 ${isLightTheme ? 'text-gray-600' : themeClasses.textSecondary}`}
           />
-          <h2
-            className={`text-xl font-semibold ${themeClasses.textPrimary}`}
-          >
+          <h2 className={`text-xl font-semibold ${themeClasses.textPrimary}`}>
             Project Memory
           </h2>
           {lastSaved && (
@@ -199,7 +197,6 @@ Things the AI should know when working on this project..."
                 }`}
               >
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
                   components={{
                     h1: ({ node, ...props }) => (
                       <h1
@@ -303,9 +300,7 @@ Things the AI should know when working on this project..."
                     td: ({ node, ...props }) => (
                       <td
                         className={`border px-4 py-2 ${
-                          isLightTheme
-                            ? 'border-gray-300'
-                            : 'border-gray-700'
+                          isLightTheme ? 'border-gray-300' : 'border-gray-700'
                         }`}
                         {...props}
                       />
@@ -317,6 +312,7 @@ Things the AI should know when working on this project..."
                       />
                     ),
                   }}
+                  remarkPlugins={[remarkGfm]}
                 >
                   {markdownContent}
                 </ReactMarkdown>

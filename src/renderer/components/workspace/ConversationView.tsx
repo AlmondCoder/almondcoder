@@ -18,7 +18,7 @@ import {
   XCircle,
   Wrench,
   Plus,
-  X
+  X,
 } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import { PromptInput } from './PromptInput'
@@ -33,7 +33,11 @@ import type {
 } from '../../../shared/types'
 import { playNotificationSound } from '../../utils/notificationSound'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import {
+  vscDarkPlus,
+  vs,
+  oneLight,
+} from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { detectLanguageFromPath } from '../../utils/languageDetection'
 
 interface ProjectContext {
@@ -45,7 +49,11 @@ interface ProjectContext {
 interface ConversationViewProps {
   projectContext?: ProjectContext
   selectedConversation: ConversationHistory
-  setSelectedConversation: (conversation: ConversationHistory) => void
+  setSelectedConversation: (
+    conversation:
+      | ConversationHistory
+      | ((prev: ConversationHistory) => ConversationHistory)
+  ) => void
   availableBranches: string[]
   getAvailableBranchesForNewPrompt: () => string[]
   isPromptBusy: (promptId: string | null) => boolean
@@ -59,6 +67,12 @@ interface ConversationViewProps {
   promptHistory: EnhancedPromptHistoryItem[]
   setPromptHistory: (history: EnhancedPromptHistoryItem[]) => void
   loadAndProcessPromptHistory: (projectPath: string) => Promise<void>
+  onTokenUsageUpdate?: (usage: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    model?: string
+  }) => void
 }
 
 interface ChatMessage {
@@ -169,12 +183,15 @@ export function ConversationView({
   promptHistory,
   setPromptHistory,
   loadAndProcessPromptHistory,
+  onTokenUsageUpdate,
 }: ConversationViewProps) {
   const { theme, themeName } = useTheme()
   const themeClasses = createThemeClasses(theme)
   const isLightTheme = themeName === 'light'
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false)
+  const [conversationLoadError, setConversationLoadError] = useState<string | null>(null)
 
   const [selectedBranch, setSelectedBranch] = useState<string>('')
   const [selectedWorktree, setSelectedWorktree] = useState<string | null>(null)
@@ -194,7 +211,8 @@ export function ConversationView({
   // Auto-scroll to bottom when conversation loads or new messages arrive
   useEffect(() => {
     if (chatMessagesScrollRef.current && chatMessages.length > 0) {
-      chatMessagesScrollRef.current.scrollTop = chatMessagesScrollRef.current.scrollHeight
+      chatMessagesScrollRef.current.scrollTop =
+        chatMessagesScrollRef.current.scrollHeight
     }
   }, [selectedConversation.promptId, chatMessages.length])
 
@@ -215,10 +233,59 @@ export function ConversationView({
     }
   }, [selectedConversation.promptId, isNewConversation])
 
+  // Load auto-accept toggle state from conversation history
+  useEffect(() => {
+    const loadToggleState = async () => {
+      if (!isNewConversation && selectedConversation.promptId) {
+        try {
+          // Reload from database to get fresh data (promptHistory prop may be stale)
+          const currentHistory = await window.App.getEnhancedPromptHistory(
+            projectContext?.projectPath || selectedConversation.projectPath
+          )
+          const prompt = currentHistory.find(
+            (p: any) => p.id === selectedConversation.promptId
+          )
+
+          if (prompt && prompt.autoAcceptEnabled !== undefined) {
+            console.log(
+              '📥 Loading auto-accept state from database:',
+              prompt.autoAcceptEnabled
+            )
+            setIsAutoAcceptEnabled(prompt.autoAcceptEnabled)
+          } else {
+            // No saved state, default to false
+            console.log('📥 No saved auto-accept state, defaulting to false')
+            setIsAutoAcceptEnabled(false)
+          }
+        } catch (error) {
+          console.error('❌ Error loading auto-accept state:', error)
+          setIsAutoAcceptEnabled(false)
+        }
+      } else {
+        // New conversation defaults to false
+        setIsAutoAcceptEnabled(false)
+      }
+    }
+
+    loadToggleState()
+  }, [
+    selectedConversation.promptId,
+    isNewConversation,
+    projectContext?.projectPath,
+    selectedConversation.projectPath,
+  ])
+
   // Load conversation messages from the conversation log file (for existing conversations)
   useEffect(() => {
     const loadConversationMessages = async () => {
       if (!isNewConversation && selectedConversation.conversationLogPath) {
+        setIsLoadingConversation(true)
+        setConversationLoadError(null)
+
+        // Track loading start time for minimum loading duration
+        const loadingStartTime = Date.now()
+        const MIN_LOADING_TIME = 400 // ms
+
         try {
           console.log(
             'Loading conversation from:',
@@ -231,11 +298,15 @@ export function ConversationView({
 
           if (!fileContent || fileContent.length === 0) {
             setChatMessages([])
+            setIsLoadingConversation(false)
             return
           }
 
           const messages: ChatMessage[] = []
-          let lastSessionId: string | undefined = undefined
+          let lastSessionId: string | undefined
+          let totalInputTokens = 0
+          let totalOutputTokens = 0
+          let conversationModel = ''
 
           fileContent.forEach((entry: any, index: number) => {
             const { timestamp, data, from } = entry
@@ -243,6 +314,21 @@ export function ConversationView({
             // Capture session_id from any message that has it
             if (data.content?.session_id) {
               lastSessionId = data.content.session_id
+            }
+
+            // Extract token usage from result messages
+            if (data.content?.type === 'result' && data.content?.usage) {
+              totalInputTokens += data.content.usage.input_tokens || 0
+              totalOutputTokens += data.content.usage.output_tokens || 0
+            }
+
+            // Extract model name from init message
+            if (
+              data.content?.type === 'system' &&
+              data.content?.subtype === 'init' &&
+              data.content?.model
+            ) {
+              conversationModel = data.content.model
             }
 
             // 1. Handle user prompt messages (from: "user")
@@ -266,7 +352,8 @@ export function ConversationView({
               data.content?.subtype === 'init'
             ) {
               messages.push({
-                id: `init-${index}`,
+                // ✅ FIX: Use session_id for uniqueness, matching real-time key generation
+                id: `init-${data.content.session_id || index}`,
                 type: 'init',
                 timestamp: new Date(timestamp),
                 sessionId: data.content.session_id,
@@ -283,7 +370,8 @@ export function ConversationView({
                 // Text blocks
                 if (block.type === 'text' && block.text) {
                   messages.push({
-                    id: `text-${index}-${blockIndex}`,
+                    // ✅ FIX: Use message ID for uniqueness, matching real-time key generation
+                    id: `text-${data.content.message.id || index}-${blockIndex}`,
                     type: 'text',
                     text: block.text,
                     timestamp: new Date(timestamp),
@@ -293,7 +381,8 @@ export function ConversationView({
                 // Tool use blocks
                 if (block.type === 'tool_use') {
                   messages.push({
-                    id: `tool-use-${index}-${blockIndex}`,
+                    // ✅ FIX: Use SDK's unique tool_use ID, matching real-time key generation
+                    id: `tool-use-${block.id}`,
                     type: 'tool_use',
                     toolName: block.name,
                     toolInput: block.input,
@@ -311,7 +400,8 @@ export function ConversationView({
               userContent.forEach((block: any, blockIndex: number) => {
                 if (block.type === 'tool_result') {
                   messages.push({
-                    id: `tool-result-${index}-${blockIndex}`,
+                    // ✅ FIX: Use tool_use_id for uniqueness, matching real-time key generation
+                    id: `tool-result-${block.tool_use_id}`,
                     type: 'tool_result',
                     toolResult: block.content,
                     toolUseId: block.tool_use_id,
@@ -325,7 +415,8 @@ export function ConversationView({
             // 5. Handle final result message
             if (data.content?.type === 'result') {
               messages.push({
-                id: `result-${index}`,
+                // ✅ FIX: Use session_id + random for uniqueness, matching real-time key generation
+                id: `result-${data.content.session_id || index}-${Math.random().toString(36).substr(2, 9)}`,
                 type: 'result',
                 duration: data.content.duration_ms,
                 cost: data.content.total_cost_usd,
@@ -364,21 +455,59 @@ export function ConversationView({
 
           setChatMessages(messages)
 
+          // Report token usage to parent component
+          if (onTokenUsageUpdate) {
+            const totalTokens = totalInputTokens + totalOutputTokens
+            console.log(
+              '📊 Token usage for conversation:',
+              `Input: ${totalInputTokens}, Output: ${totalOutputTokens}, Total: ${totalTokens}`
+            )
+            onTokenUsageUpdate({
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              totalTokens,
+              model: conversationModel,
+            })
+          }
+
           // Update selectedConversation with captured session ID
-          if (lastSessionId && lastSessionId !== selectedConversation.aiSessionId) {
-            console.log('🔑 Loaded session ID from conversation file:', lastSessionId)
+          if (
+            lastSessionId &&
+            lastSessionId !== selectedConversation.aiSessionId
+          ) {
+            console.log(
+              '🔑 Loaded session ID from conversation file:',
+              lastSessionId
+            )
             setSelectedConversation({
               ...selectedConversation,
-              aiSessionId: lastSessionId
+              aiSessionId: lastSessionId,
             })
           }
         } catch (error) {
           console.error('Error loading conversation messages:', error)
+          setConversationLoadError(
+            error instanceof Error
+              ? error.message
+              : 'Failed to load conversation history'
+          )
           setChatMessages([])
+        } finally {
+          // Ensure minimum loading time for better UX
+          const elapsedTime = Date.now() - loadingStartTime
+          const remainingTime = MIN_LOADING_TIME - elapsedTime
+
+          if (remainingTime > 0) {
+            await new Promise(resolve => setTimeout(resolve, remainingTime))
+          }
+
+          setIsLoadingConversation(false)
         }
       } else {
         // Clear messages for new conversations
         setChatMessages([])
+        setIsLoadingConversation(false)
+        setConversationLoadError(null)
       }
     }
 
@@ -405,102 +534,34 @@ export function ConversationView({
       console.log('   Conversation:', request.conversationTitle)
       console.log('   Request ID:', request.requestId)
 
-      // Update busyConversations status to 'waiting_permission'
-      setBusyConversations(prev => {
-        const updatedMap = new Map(prev)
-        const busyConv = updatedMap.get(request.promptId)
-
-        if (busyConv) {
-          // Change status from 'running' to 'waiting_permission'
-          busyConv.status = 'waiting_permission'
-
-          // Store the pending tool details so UI can display them
-          busyConv.pendingPermission = {
-            requestId: request.requestId,
-            toolName: request.toolName,
-            toolInput: request.toolInput,
-            timestamp: new Date(request.timestamp),
-          }
-
-          updatedMap.set(request.promptId, busyConv)
-          console.log(
-            '✅ [Permission] Updated conversation status to waiting_permission'
-          )
-
-          // ============================================================================
-          // Log Permission Request to Conversation File
-          // ============================================================================
-          // LOGIC: Write to conversation log so when user switches to this conversation
-          // (even if it's running in background), they can see the permission request
-          // in the chat history
-          const conversationLogPath = busyConv.conversation.conversationLogPath
-          if (conversationLogPath) {
-            updateConversationFile(
-              conversationLogPath,
-              {
-                content: {
-                  type: 'permission_request',
-                  requestId: request.requestId,
-                  toolName: request.toolName,
-                  toolInput: request.toolInput,
-                  status: 'pending',
-                },
-              },
-              Response.system
-            ).catch(err => {
-              console.error('❌ Failed to log permission request to file:', err)
-            })
-          }
-        } else {
-          console.warn(
-            '⚠️  [Permission] No busy conversation found for promptId:',
-            request.promptId
-          )
-        }
-
-        return updatedMap
-      })
+      // ✅ State update handled by main process broadcast
+      // Just log the permission request to the conversation file
+      const busyConv = busyConversations.get(request.promptId)
+      if (busyConv?.conversation.conversationLogPath) {
+        updateConversationFile(
+          busyConv.conversation.conversationLogPath,
+          {
+            content: {
+              type: 'permission_request',
+              requestId: request.requestId,
+              toolName: request.toolName,
+              toolInput: request.toolInput,
+              status: 'pending',
+            },
+          },
+          Response.system
+        ).catch(err => {
+          console.error('❌ Failed to log permission request to file:', err)
+        })
+      }
 
       // ✨ Play notification sound in frontend (not main process)
       // LOGIC: Alert user that a conversation needs their attention
       playNotificationSound()
     }
 
-    // ============================================================================
-    // Handle Tool Permission Timeout
-    // ============================================================================
-    // LOGIC: If user doesn't respond within 10 minutes, main process sends timeout
-    // event. We remove the pending permission and let the conversation continue
-    // (it will be denied automatically by the main process).
-    const handleToolTimeout = (data: { requestId: string }) => {
-      console.log('⏰ [Permission] Tool request timed out:', data.requestId)
-
-      // Find the conversation with this requestId and clear its pending permission
-      setBusyConversations(prev => {
-        const updatedMap = new Map(prev)
-
-        // Search through all conversations to find the one with this requestId
-        for (const [promptId, busyConv] of updatedMap.entries()) {
-          if (busyConv.pendingPermission?.requestId === data.requestId) {
-            // Clear the pending permission and restore 'running' status
-            busyConv.status = 'running'
-            busyConv.pendingPermission = undefined
-            updatedMap.set(promptId, busyConv)
-            console.log(
-              '✅ [Permission] Cleared timed-out permission for conversation:',
-              promptId
-            )
-            break
-          }
-        }
-
-        return updatedMap
-      })
-    }
-
     // Register IPC event listeners
     window.App.onToolPermissionPending(handleToolPending)
-    window.App.onToolPermissionTimeout(handleToolTimeout)
 
     // Cleanup on unmount
     return () => {
@@ -508,7 +569,6 @@ export function ConversationView({
       window.App.removeToolPermissionListeners()
     }
   }, []) // ✅ Empty dependency array - listeners registered once on mount
-
 
   const ensureGitRepositoryInitialized = async (
     projectPath: string,
@@ -621,7 +681,7 @@ export function ConversationView({
       case 'system':
         if (sdkMessage.subtype === 'init') {
           messages.push({
-            id: `init-${Date.now()}`,
+            id: `init-${sdkMessage.session_id || Date.now()}`,
             type: 'init',
             timestamp,
             sessionId: sdkMessage.session_id,
@@ -635,15 +695,17 @@ export function ConversationView({
         // Extract text and tool_use blocks
         sdkMessage.message.content.forEach((block: any, idx: number) => {
           if (block.type === 'text' && block.text) {
+            // ✅ FIX: Use message ID + index for uniqueness
             messages.push({
-              id: `text-${Date.now()}-${idx}`,
+              id: `text-${sdkMessage.message.id || Date.now()}-${idx}`,
               type: 'text',
               text: block.text,
               timestamp,
             })
           } else if (block.type === 'tool_use') {
+            // ✅ FIX: Use SDK's unique tool_use ID instead of timestamp
             messages.push({
-              id: `tool-use-${Date.now()}-${idx}`,
+              id: `tool-use-${block.id}`,
               type: 'tool_use',
               toolName: block.name,
               toolInput: block.input,
@@ -658,8 +720,9 @@ export function ConversationView({
         // Extract tool results
         sdkMessage.message.content.forEach((block: any, idx: number) => {
           if (block.type === 'tool_result') {
+            // ✅ FIX: Use tool_use_id for uniqueness (links to the tool that was executed)
             messages.push({
-              id: `tool-result-${Date.now()}-${idx}`,
+              id: `tool-result-${block.tool_use_id}`,
               type: 'tool_result',
               toolResult: block.content,
               toolUseId: block.tool_use_id,
@@ -671,8 +734,9 @@ export function ConversationView({
         break
 
       case 'result':
+        // ✅ FIX: Use session_id or timestamp + random for uniqueness
         messages.push({
-          id: `result-${Date.now()}`,
+          id: `result-${sdkMessage.session_id || Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           type: 'result',
           duration: sdkMessage.duration_ms,
           cost: sdkMessage.total_cost_usd,
@@ -737,20 +801,8 @@ export function ConversationView({
     // The main process's canUseTool callback is waiting for this response
     window.App.acceptToolPermission({ requestId })
 
-    // Update conversation status back to 'running'
-    // LOGIC: Permission approved, Claude can now execute the tool and continue
-    setBusyConversations(prev => {
-      const updatedMap = new Map(prev)
-      const busyConv = updatedMap.get(selectedConversation.promptId)
-
-      if (busyConv) {
-        busyConv.status = 'running'
-        busyConv.pendingPermission = undefined // Clear the pending permission
-        updatedMap.set(selectedConversation.promptId, busyConv)
-      }
-
-      return updatedMap
-    })
+    // ✅ State update handled by main process (in acceptListener callback)
+    // No need to manually update here - main process will broadcast the change
   }
 
   const handleExecute = async (promptText: string) => {
@@ -819,20 +871,8 @@ export function ConversationView({
         newPrompt: userPromptText,
       })
 
-      // Update conversation status back to 'running'
-      // LOGIC: Permission cancelled, Claude will receive denial + new instructions
-      setBusyConversations(prev => {
-        const updatedMap = new Map(prev)
-        const busyConv = updatedMap.get(selectedConversation.promptId)
-
-        if (busyConv) {
-          busyConv.status = 'running'
-          busyConv.pendingPermission = undefined // Clear the pending permission
-          updatedMap.set(selectedConversation.promptId, busyConv)
-        }
-
-        return updatedMap
-      })
+      // ✅ State update handled by main process
+      // Main process will broadcast status change back to 'running'
 
       // Don't proceed with normal execution - the SDK is already running
       // and will receive the denial message with the new prompt
@@ -852,7 +892,7 @@ export function ConversationView({
     } else {
       setChatMessages(prev => [...prev, userMessage])
     }
-    console.log('current chat messages', chatMessages);
+    console.log('current chat messages', chatMessages)
 
     let promptId: string
     let conversationLogPath: string
@@ -888,7 +928,10 @@ export function ConversationView({
 
         // Save user message to conversation log immediately (before setSelectedConversation)
         // This ensures the useEffect that loads messages will find the user message in the file
-        console.log('💬 Saving user message to conversation log:', userPromptText)
+        console.log(
+          '💬 Saving user message to conversation log:',
+          userPromptText
+        )
         await updateConversationFile(
           conversationLogPath,
           { content: { type: 'text', text: userPromptText } },
@@ -940,6 +983,7 @@ export function ConversationView({
           status: 'busy',
           projectPath: projectContext.projectPath,
           worktreePath,
+          autoAcceptEnabled: isAutoAcceptEnabled,
           createdAt: new Date(),
           updatedAt: new Date(),
         })
@@ -961,7 +1005,10 @@ export function ConversationView({
         // Check if prompt file has existing session ID (from previous execution)
         const savedPrompt = updatedHistory.find((p: any) => p.id === promptId)
         sessionId = savedPrompt?.aiSessionId
-        console.log('🔑 Loaded session ID from database:', sessionId || 'none (will create new)')
+        console.log(
+          '🔑 Loaded session ID from database:',
+          sessionId || 'none (will create new)'
+        )
       } else {
         // EXISTING CONVERSATION: Reuse existing context
         conversation = { ...selectedConversation }
@@ -994,7 +1041,10 @@ export function ConversationView({
           // Session ID not in memory, try loading from database
           const historyItem = promptHistory.find(p => p.id === promptId)
           sessionId = historyItem?.aiSessionId
-          console.log('🔑 Loaded session ID from database for existing conversation:', sessionId || 'none (will create new)')
+          console.log(
+            '🔑 Loaded session ID from database for existing conversation:',
+            sessionId || 'none (will create new)'
+          )
         } else {
           console.log('🔑 Using session ID from memory:', sessionId)
         }
@@ -1005,7 +1055,10 @@ export function ConversationView({
       // Save user message to conversation log (for existing conversations only)
       // New conversations already saved the message earlier
       if (!isNewConversation) {
-        console.log('💬 Saving user message to conversation log:', userPromptText)
+        console.log(
+          '💬 Saving user message to conversation log:',
+          userPromptText
+        )
         await updateConversationFile(
           conversationLogPath,
           { content: { type: 'text', text: userPromptText } },
@@ -1013,16 +1066,27 @@ export function ConversationView({
         )
       }
 
-      // Mark conversation as busy
-      console.log('⏳ Marking conversation as busy:', promptId)
-      setBusyConversations(prev => {
-        const newBusyMap = new Map(prev)
-        newBusyMap.set(promptId, {
-          conversation,
-          status: 'running',
-        })
-        return newBusyMap
-      })
+      let freshAutoAcceptEnabled = isAutoAcceptEnabled
+      try {
+        const currentHistory = await window.App.getEnhancedPromptHistory(
+          projectContext?.projectPath || conversation.projectPath
+        )
+        const prompt = currentHistory.find((p: any) => p.id === promptId)
+        console.log('prompt which has been loaded from the file:', prompt)
+        freshAutoAcceptEnabled = prompt.autoAcceptEnabled
+        console.log(
+          '✅ Loaded fresh auto-accept state from database:',
+          freshAutoAcceptEnabled
+        )
+      } catch (error) {
+        console.error(
+          '❌ Error loading auto-accept state from DB, using current state:',
+          error
+        )
+      }
+
+      // ✅ State managed by main process - no need to set here
+      // Main process will broadcast 'running' status when SDK query starts
 
       // Setup message handler for Claude SDK output
       console.log('📡 Setting up message handler for Claude SDK...')
@@ -1049,7 +1113,9 @@ export function ConversationView({
           return // Exit early - prevents session ID contamination
         }
 
-        console.log('✅ [FILTER] Message belongs to this conversation, processing...')
+        console.log(
+          '✅ [FILTER] Message belongs to this conversation, processing...'
+        )
         console.log('🔔 handleClaudeMessage called!', data)
         try {
           console.log('🔍 Raw data received:', data)
@@ -1102,16 +1168,6 @@ export function ConversationView({
           // Capture session ID for resumption
           if (sdkMessage.session_id) {
             console.log('🔑 Captured session ID:', sdkMessage.session_id)
-            setBusyConversations(prev => {
-              const updatedBusyMap = new Map(prev)
-              const busyConv = updatedBusyMap.get(promptId)
-              if (busyConv) {
-                busyConv.sessionId = sdkMessage.session_id
-                busyConv.conversation.aiSessionId = sdkMessage.session_id
-                updatedBusyMap.set(promptId, busyConv)
-              }
-              return updatedBusyMap
-            })
 
             // Update selectedConversation for resumption
             setSelectedConversation(prev => {
@@ -1138,9 +1194,15 @@ export function ConversationView({
                   updatedAt: new Date(),
                   aiSessionId: sdkMessage.session_id,
                 })
-                console.log('✅ Persisted session ID to database:', sdkMessage.session_id)
+                console.log(
+                  '✅ Persisted session ID to database:',
+                  sdkMessage.session_id
+                )
               } else {
-                console.warn('⚠️  Could not find prompt in database to update session ID:', promptId)
+                console.warn(
+                  '⚠️  Could not find prompt in database to update session ID:',
+                  promptId
+                )
               }
             } catch (error) {
               console.error('❌ Failed to persist session ID:', error)
@@ -1148,7 +1210,6 @@ export function ConversationView({
 
             // Update selected conversation with session ID (only if still selected)
             conversation.aiSessionId = sdkMessage.session_id
-            
           }
 
           // Handle completion
@@ -1157,12 +1218,25 @@ export function ConversationView({
               '🏁 Conversation completed with status:',
               sdkMessage.subtype
             )
-            setBusyConversations(prev => {
-              const updatedBusyMap = new Map(prev)
-              updatedBusyMap.delete(promptId)
-              return updatedBusyMap
-            })
-            console.log('✅ Removed conversation from busy map:', promptId)
+            // ✅ State update handled by main process
+            // Main process automatically broadcasts 'completed' status
+            console.log('✅ Conversation completed:', promptId)
+
+            // Report token usage from result message
+            if (sdkMessage.usage && onTokenUsageUpdate) {
+              const inputTokens = sdkMessage.usage.input_tokens || 0
+              const outputTokens = sdkMessage.usage.output_tokens || 0
+              const totalTokens = inputTokens + outputTokens
+              console.log(
+                '📊 Real-time token usage update:',
+                `Input: ${inputTokens}, Output: ${outputTokens}, Total: ${totalTokens}`
+              )
+              onTokenUsageUpdate({
+                inputTokens,
+                outputTokens,
+                totalTokens,
+              })
+            }
 
             // Update prompt status to 'completed' in the database
             try {
@@ -1177,9 +1251,10 @@ export function ConversationView({
 
                 // Refresh prompt history to show updated status
                 if (projectContext?.projectPath) {
-                  const updatedHistory = await window.App.getEnhancedPromptHistory(
-                    projectContext.projectPath
-                  )
+                  const updatedHistory =
+                    await window.App.getEnhancedPromptHistory(
+                      projectContext.projectPath
+                    )
                   setPromptHistory(
                     updatedHistory.map((item: any) => ({
                       ...item,
@@ -1207,7 +1282,10 @@ export function ConversationView({
       console.log('🚀 Starting Claude SDK execution for:', promptId)
       console.log('📂 Working directory:', worktreePath)
       console.log('🔄 Session ID (resume):', sessionId)
-      console.log('🔒 Auto-accept enabled:', isAutoAcceptEnabled)
+      console.log(
+        '🔒 Auto-accept enabled (fresh from DB):',
+        freshAutoAcceptEnabled
+      )
 
       try {
         const result = await window.App.executeClaudeSDK(
@@ -1222,7 +1300,7 @@ export function ConversationView({
             // LOGIC: Pass these to main process so canUseTool can route permissions correctly
             promptId, // Which conversation is making this request
             conversationTitle: userPromptText.substring(0, 200), // Display name for UI
-            autoAcceptEnabled: isAutoAcceptEnabled, // Whether to bypass permission requests
+            autoAcceptEnabled: freshAutoAcceptEnabled, // ✅ FIX: Use fresh value from DB, not stale state
           },
           handleClaudeMessage // Pass the callback here
         )
@@ -1231,12 +1309,8 @@ export function ConversationView({
       } catch (sdkError) {
         console.error('❌ Error executing Claude SDK:', sdkError)
 
-        // Clean up busy state on error
-        setBusyConversations(prev => {
-          const updatedBusyMap = new Map(prev)
-          updatedBusyMap.delete(promptId)
-          return updatedBusyMap
-        })
+        // ✅ State update handled by main process
+        // Main process automatically broadcasts 'error' status
 
         // Log error to conversation file
         await updateConversationFile(
@@ -1256,12 +1330,8 @@ export function ConversationView({
     } catch (error) {
       console.error('❌ Error executing conversation:', error)
 
-      // Remove from busy conversations on error
-      setBusyConversations(prev => {
-        const updatedBusyMap = new Map(prev)
-        updatedBusyMap.delete(promptId)
-        return updatedBusyMap
-      })
+      // ✅ State update handled by main process
+      // Main process automatically broadcasts 'error' status
 
       if (isNewConversation) {
         alert(
@@ -1276,8 +1346,82 @@ export function ConversationView({
       className="flex-1 flex flex-col h-full overflow-hidden"
       ref={chatContainerRef}
     >
+      {/* Loading State */}
+      {isLoadingConversation && (
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          {/* Spinner and Text */}
+          <div className={`text-center mb-8 ${themeClasses.textSecondary}`}>
+            <div
+              className="animate-spin w-12 h-12 border-4 border-t-transparent rounded-full mx-auto mb-4"
+              style={{
+                borderColor: `${theme.border.primary} ${theme.border.primary} ${theme.border.primary} transparent`
+              }}
+            ></div>
+            <p className="text-lg font-medium">Loading conversation...</p>
+          </div>
+
+          {/* Skeleton Message Bubbles */}
+          <div className="w-full max-w-3xl space-y-4">
+            {/* Skeleton User Message */}
+            <div className="flex justify-end">
+              <div
+                className="w-2/3 h-16 rounded-lg animate-pulse"
+                style={{ backgroundColor: theme.background.tertiary }}
+              ></div>
+            </div>
+
+            {/* Skeleton AI Message */}
+            <div className="flex justify-start">
+              <div
+                className="w-3/4 h-24 rounded-lg animate-pulse"
+                style={{ backgroundColor: theme.background.tertiary }}
+              ></div>
+            </div>
+
+            {/* Skeleton Tool Use */}
+            <div className="flex justify-start">
+              <div
+                className="w-1/2 h-12 rounded-lg animate-pulse"
+                style={{ backgroundColor: theme.background.tertiary }}
+              ></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {conversationLoadError && !isLoadingConversation && (
+        <div
+          className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-6`}
+        >
+          <div className="flex items-start gap-3">
+            <div className="text-red-400 text-xl">⚠️</div>
+            <div>
+              <h3
+                className={`text-lg font-semibold ${themeClasses.textPrimary} mb-2`}
+              >
+                Error Loading Conversation
+              </h3>
+              <p className={`text-sm ${themeClasses.textSecondary} mb-4`}>
+                {conversationLoadError}
+              </p>
+              <button
+                className={`${themeClasses.btnSecondary} px-4 py-2 rounded text-sm font-medium`}
+                onClick={() => {
+                  // Trigger reload by setting a new random key or forcing re-render
+                  setConversationLoadError(null)
+                  window.location.reload()
+                }}
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Show different layouts based on conversation state */}
-      {isNewConversation ? (
+      {!isLoadingConversation && !conversationLoadError && isNewConversation ? (
         /* New Conversation - Centered layout for both themes */
         <div className="flex-1 flex items-center justify-center">
           <div className="w-full max-w-2xl px-6">
@@ -1302,27 +1446,29 @@ export function ConversationView({
             {/* Input Container */}
             <div className="mb-4">
               <PromptInput
-                onExecute={handleExecute}
-                isNewConversation={isNewConversation}
-                isExecuting={
-                  busyConversations.get(selectedConversation.promptId)?.status === 'running'
+                availableBranches={availableBranches}
+                getAvailableBranchesForNewPrompt={
+                  getAvailableBranchesForNewPrompt
                 }
+                isExecuting={
+                  busyConversations.get(selectedConversation.promptId)
+                    ?.status === 'running'
+                }
+                isNewConversation={isNewConversation}
+                onBranchSelect={setSelectedBranch}
+                onExecute={handleExecute}
+                onWorktreeSelect={setSelectedWorktree}
                 projectContext={projectContext}
                 selectedBranch={selectedBranch}
-                availableBranches={availableBranches}
-                onBranchSelect={setSelectedBranch}
-                onWorktreeSelect={setSelectedWorktree}
-                getAvailableBranchesForNewPrompt={getAvailableBranchesForNewPrompt}
               />
             </div>
-
           </div>
         </div>
-      ) : chatMessages.length > 0 ? (
+      ) : !isLoadingConversation && !conversationLoadError && chatMessages.length > 0 ? (
         /* Existing conversation with messages */
         <div
-          ref={chatMessagesScrollRef}
           className={`flex-1 overflow-y-auto ${isLightTheme ? 'bg-white' : themeClasses.bgSecondary} rounded-lg p-6 space-y-4 mb-2`}
+          ref={chatMessagesScrollRef}
         >
           {chatMessages.map((message, index) => {
             // Helper function to determine if this message should have a connecting line
@@ -1370,7 +1516,7 @@ export function ConversationView({
                           ? 'bg-gray-100 text-gray-800'
                           : 'bg-gray-700 text-gray-200'
                       }`}
-                      style={{ fontSize: '0.8rem' }}
+                      style={{ fontSize: 'var(--font-size-base)' }}
                     >
                       {message.text}
                     </div>
@@ -1393,7 +1539,7 @@ export function ConversationView({
                     className={`flex-1 whitespace-pre-wrap select-text cursor-text ${
                       isLightTheme ? 'text-gray-700' : 'text-gray-300'
                     } ${hasConnectingLine ? '' : 'ml-3'}`}
-                    style={{ fontSize: '0.8rem' }}
+                    style={{ fontSize: 'var(--font-size-base)' }}
                   >
                     {message.text}
                   </div>
@@ -1444,7 +1590,10 @@ export function ConversationView({
                       />
                       <span
                         className="font-medium"
-                        style={{ color: theme.text.primary, fontSize: '0.8rem' }}
+                        style={{
+                          color: theme.text.primary,
+                          fontSize: 'var(--font-size-base)',
+                        }}
                       >
                         {message.toolName}
                       </span>
@@ -1471,9 +1620,12 @@ export function ConversationView({
                         }`}
                       >
                         <SyntaxHighlighter
-                          language={detectLanguageFromPath(message.toolInput.file_path)}
-                          style={isLightTheme ? vs : vscDarkPlus}
-                          showLineNumbers
+                          codeTagProps={{
+                            style: {
+                              cursor: 'text',
+                              userSelect: 'text',
+                            },
+                          }}
                           customStyle={{
                             margin: 0,
                             borderRadius: 0,
@@ -1483,18 +1635,17 @@ export function ConversationView({
                             cursor: 'text',
                             userSelect: 'text',
                           }}
+                          language={detectLanguageFromPath(
+                            message.toolInput.file_path
+                          )}
                           lineNumberStyle={{
                             minWidth: '3em',
                             paddingRight: '1em',
                             color: isLightTheme ? '#9ca3af' : '#6b7280',
                             userSelect: 'none',
                           }}
-                          codeTagProps={{
-                            style: {
-                              cursor: 'text',
-                              userSelect: 'text',
-                            }
-                          }}
+                          showLineNumbers
+                          style={isLightTheme ? oneLight : vscDarkPlus}
                         >
                           {message.toolInput.content}
                         </SyntaxHighlighter>
@@ -1528,9 +1679,12 @@ export function ConversationView({
                             - Removed
                           </div>
                           <SyntaxHighlighter
-                            language={detectLanguageFromPath(message.toolInput.file_path)}
-                            style={isLightTheme ? vs : vscDarkPlus}
-                            showLineNumbers
+                            codeTagProps={{
+                              style: {
+                                cursor: 'text',
+                                userSelect: 'text',
+                              },
+                            }}
                             customStyle={{
                               margin: 0,
                               borderRadius: 0,
@@ -1540,18 +1694,17 @@ export function ConversationView({
                               cursor: 'text',
                               userSelect: 'text',
                             }}
+                            language={detectLanguageFromPath(
+                              message.toolInput.file_path
+                            )}
                             lineNumberStyle={{
                               minWidth: '3em',
                               paddingRight: '1em',
                               color: isLightTheme ? '#9ca3af' : '#6b7280',
                               userSelect: 'none',
                             }}
-                            codeTagProps={{
-                              style: {
-                                cursor: 'text',
-                                userSelect: 'text',
-                              }
-                            }}
+                            showLineNumbers
+                            style={isLightTheme ? vs : vscDarkPlus}
                           >
                             {message.toolInput.old_string}
                           </SyntaxHighlighter>
@@ -1575,9 +1728,12 @@ export function ConversationView({
                             + Added
                           </div>
                           <SyntaxHighlighter
-                            language={detectLanguageFromPath(message.toolInput.file_path)}
-                            style={isLightTheme ? vs : vscDarkPlus}
-                            showLineNumbers
+                            codeTagProps={{
+                              style: {
+                                cursor: 'text',
+                                userSelect: 'text',
+                              },
+                            }}
                             customStyle={{
                               margin: 0,
                               borderRadius: 0,
@@ -1587,18 +1743,17 @@ export function ConversationView({
                               cursor: 'text',
                               userSelect: 'text',
                             }}
+                            language={detectLanguageFromPath(
+                              message.toolInput.file_path
+                            )}
                             lineNumberStyle={{
                               minWidth: '3em',
                               paddingRight: '1em',
                               color: isLightTheme ? '#9ca3af' : '#6b7280',
                               userSelect: 'none',
                             }}
-                            codeTagProps={{
-                              style: {
-                                cursor: 'text',
-                                userSelect: 'text',
-                              }
-                            }}
+                            showLineNumbers
+                            style={isLightTheme ? vs : vscDarkPlus}
                           >
                             {message.toolInput.new_string}
                           </SyntaxHighlighter>
@@ -1616,63 +1771,77 @@ export function ConversationView({
                         }`}
                       >
                         <div className="p-2 space-y-1">
-                          {message.toolInput.todos.map((todo: TodoItem, todoIndex: number) => {
-                            const isCompleted = todo.status === 'completed'
-                            const isInProgress = todo.status === 'in_progress'
+                          {message.toolInput.todos.map(
+                            (todo: TodoItem, todoIndex: number) => {
+                              const isCompleted = todo.status === 'completed'
+                              const isInProgress = todo.status === 'in_progress'
 
-                            return (
-                              <div
-                                key={todoIndex}
-                                className="flex items-center gap-2 py-1 px-2"
-                              >
-                                {/* Status Icon */}
-                                <div className="flex-shrink-0">
-                                  {isCompleted ? (
-                                    <CheckSquare
-                                      className="w-3.5 h-3.5"
-                                      style={{ color: isLightTheme ? '#22c55e' : '#4ade80' }}
-                                    />
-                                  ) : isInProgress ? (
-                                    <div
-                                      className="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center"
-                                      style={{
-                                        borderColor: isLightTheme ? '#3b82f6' : '#60a5fa',
-                                      }}
-                                    >
-                                      <div
-                                        className="w-1.5 h-1.5 rounded-full"
+                              return (
+                                <div
+                                  className="flex items-center gap-2 py-1 px-2"
+                                  key={todoIndex}
+                                >
+                                  {/* Status Icon */}
+                                  <div className="flex-shrink-0">
+                                    {isCompleted ? (
+                                      <CheckSquare
+                                        className="w-3.5 h-3.5"
                                         style={{
-                                          backgroundColor: isLightTheme ? '#3b82f6' : '#60a5fa',
+                                          color: isLightTheme
+                                            ? '#22c55e'
+                                            : '#4ade80',
                                         }}
                                       />
-                                    </div>
-                                  ) : (
-                                    <div
-                                      className="w-3.5 h-3.5 rounded border"
-                                      style={{
-                                        borderColor: isLightTheme ? '#d1d5db' : '#4b5563',
-                                      }}
-                                    />
-                                  )}
-                                </div>
+                                    ) : isInProgress ? (
+                                      <div
+                                        className="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center"
+                                        style={{
+                                          borderColor: isLightTheme
+                                            ? '#3b82f6'
+                                            : '#60a5fa',
+                                        }}
+                                      >
+                                        <div
+                                          className="w-1.5 h-1.5 rounded-full"
+                                          style={{
+                                            backgroundColor: isLightTheme
+                                              ? '#3b82f6'
+                                              : '#60a5fa',
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div
+                                        className="w-3.5 h-3.5 rounded border"
+                                        style={{
+                                          borderColor: isLightTheme
+                                            ? '#d1d5db'
+                                            : '#4b5563',
+                                        }}
+                                      />
+                                    )}
+                                  </div>
 
-                                {/* Todo Content */}
-                                <div
-                                  className={`text-xs flex-1 cursor-text select-text ${
-                                    isCompleted
-                                      ? isLightTheme
-                                        ? 'text-gray-400 line-through'
-                                        : 'text-gray-500 line-through'
-                                      : isLightTheme
-                                        ? 'text-gray-700'
-                                        : 'text-gray-300'
-                                  }`}
-                                >
-                                  {isInProgress ? todo.activeForm : todo.content}
+                                  {/* Todo Content */}
+                                  <div
+                                    className={`text-xs flex-1 cursor-text select-text ${
+                                      isCompleted
+                                        ? isLightTheme
+                                          ? 'text-gray-400 line-through'
+                                          : 'text-gray-500 line-through'
+                                        : isLightTheme
+                                          ? 'text-gray-700'
+                                          : 'text-gray-300'
+                                    }`}
+                                  >
+                                    {isInProgress
+                                      ? todo.activeForm
+                                      : todo.content}
+                                  </div>
                                 </div>
-                              </div>
-                            )
-                          })}
+                              )
+                            }
+                          )}
                         </div>
                       </div>
                     )}
@@ -1714,7 +1883,10 @@ export function ConversationView({
                       />
                       <span
                         className="font-medium"
-                        style={{ color: theme.text.primary, fontSize: '0.8rem' }}
+                        style={{
+                          color: theme.text.primary,
+                          fontSize: '0.8rem',
+                        }}
                       >
                         Tool Error
                       </span>
@@ -1810,7 +1982,6 @@ export function ConversationView({
 
             return null
           })}
-        
         </div>
       ) : (
         /* Empty state for existing conversation with no messages */
@@ -1886,7 +2057,67 @@ export function ConversationView({
                 className={`relative w-14 h-7 rounded-full transition-colors ${
                   isAutoAcceptEnabled ? 'bg-green-500' : 'bg-gray-600'
                 }`}
-                onClick={() => setIsAutoAcceptEnabled(!isAutoAcceptEnabled)}
+                onClick={async () => {
+                  const newValue = !isAutoAcceptEnabled
+                  setIsAutoAcceptEnabled(newValue)
+
+                  // ============================================================================
+                  // ✅ FIX: Immediately update main process cache (real-time)
+                  // ============================================================================
+                  // LOGIC: This IPC call updates the in-memory cache in the main process
+                  // INSTANTLY, so the running canUseTool callback uses the fresh value.
+                  // This happens BEFORE the database write, ensuring zero delay.
+                  if (selectedConversation.promptId) {
+                    console.log(
+                      '⚡ Updating auto-accept cache in main process:',
+                      newValue
+                    )
+                    window.App.updateAutoAcceptState({
+                      promptId: selectedConversation.promptId,
+                      enabled: newValue,
+                    })
+                  }
+
+                  // Then persist toggle state to database (async, for persistence)
+                  if (selectedConversation.promptId) {
+                    try {
+                      console.log(
+                        '💾 Saving auto-accept state to database:',
+                        newValue
+                      )
+
+                      // Reload prompt history to get latest data
+                      const currentHistory =
+                        await window.App.getEnhancedPromptHistory(
+                          projectContext?.projectPath ||
+                            selectedConversation.projectPath
+                        )
+                      const prompt = currentHistory.find(
+                        (p: any) => p.id === selectedConversation.promptId
+                      )
+
+                      if (prompt) {
+                        await window.App.updateEnhancedPrompt({
+                          ...prompt,
+                          startExecutionTime: new Date(
+                            prompt.startExecutionTime
+                          ),
+                          createdAt: new Date(prompt.createdAt),
+                          updatedAt: new Date(),
+                          autoAcceptEnabled: newValue,
+                        })
+                        console.log(
+                          '✅ Auto-accept state saved successfully to database'
+                        )
+                      }
+                    } catch (error) {
+                      console.error(
+                        '❌ Error saving auto-accept state to database:',
+                        error
+                      )
+                    }
+                  }
+                }}
                 title={
                   isAutoAcceptEnabled
                     ? 'Auto-accept is ON - tools will execute immediately'
@@ -1903,7 +2134,7 @@ export function ConversationView({
 
               {/* Accept Button or Spinner */}
               {busyConversations.get(selectedConversation.promptId)?.status ===
-              'waiting_permission' && (
+                'waiting_permission' && (
                 <button
                   className="bg-white text-gray-900 hover:bg-gray-100 px-4 py-1.5 rounded text-sm font-medium transition-colors"
                   onClick={handleAcceptPermission}
@@ -1918,17 +2149,17 @@ export function ConversationView({
           {/* Textarea with integrated pill selector */}
           <div className="space-y-3">
             <PromptInput
-              onExecute={handleExecute}
-              isNewConversation={false}
-              isExecuting={
-                busyConversations.get(selectedConversation.promptId)?.status === 'running'
-              }
-              projectContext={projectContext}
-              selectedBranch={selectedBranch}
               availableBranches={availableBranches}
+              getAvailableBranchesForNewPrompt={
+                getAvailableBranchesForNewPrompt
+              }
+              isExecuting={
+                busyConversations.get(selectedConversation.promptId)?.status ===
+                'running'
+              }
+              isNewConversation={false}
               onBranchSelect={setSelectedBranch}
-              onWorktreeSelect={setSelectedWorktree}
-              getAvailableBranchesForNewPrompt={getAvailableBranchesForNewPrompt}
+              onExecute={handleExecute}
               onNewConversation={() => {
                 if (
                   isNewConversation &&
@@ -1937,6 +2168,9 @@ export function ConversationView({
                   setSelectedConversation(newConversation())
                 }
               }}
+              onWorktreeSelect={setSelectedWorktree}
+              projectContext={projectContext}
+              selectedBranch={selectedBranch}
             />
           </div>
 

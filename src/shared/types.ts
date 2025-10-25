@@ -49,6 +49,7 @@ export interface EnhancedPromptHistoryItem {
   projectPath: string
   worktreePath?: string
   aiSessionId?: string
+  autoAcceptEnabled?: boolean // Persists auto-accept toggle state (default: false)
   isExecuting?: boolean
   createdAt: Date
   updatedAt: Date

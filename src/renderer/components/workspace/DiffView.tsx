@@ -261,9 +261,9 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                 </div>
               </button>
 
-              {/* Diff Content - Scrollable */}
+              {/* Diff Content - GitHub-style diff view */}
               {isExpanded && (
-                <div className="max-h-96 overflow-y-auto font-mono text-xs">
+                <div className="font-mono text-xs">
                   {diff.hunks.map((hunk, hunkIndex) => (
                     <div key={hunkIndex}>
                       {hunk.lines.map((line, lineIndex) => {
@@ -272,89 +272,134 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                         if (line.type === 'header') {
                           return (
                             <div
-                              className="px-3 py-1 border-t border-b sticky top-0"
-                              style={{
-                                backgroundColor: theme.background.tertiary,
-                                color: theme.text.accent,
-                                borderColor: theme.border.primary,
-                              }}
+                              className="px-3 py-2 font-semibold"
                               key={lineKey}
+                              style={{
+                                backgroundColor: isLightTheme ? '#f6f8fa' : '#161b22',
+                                color: isLightTheme ? '#57606a' : '#8b949e',
+                                borderTop: isLightTheme ? '1px solid #d0d7de' : '1px solid #30363d',
+                                borderBottom: isLightTheme ? '1px solid #d0d7de' : '1px solid #30363d',
+                              }}
                             >
                               {line.content}
                             </div>
                           )
                         }
 
+                        // GitHub-style colors
                         const bgColor =
                           line.type === 'added'
                             ? isLightTheme
-                              ? 'rgba(34, 197, 94, 0.08)'
-                              : 'rgba(34, 197, 94, 0.12)'
+                              ? '#e6ffec'  // GitHub light green background
+                              : '#1a2e23'  // GitHub dark green background
                             : line.type === 'deleted'
                               ? isLightTheme
-                                ? 'rgba(239, 68, 68, 0.08)'
-                                : 'rgba(239, 68, 68, 0.12)'
-                              : 'transparent'
-
-                        const borderColor =
-                          line.type === 'added'
-                            ? isLightTheme
-                              ? '#22c55e'
-                              : '#4ade80'
-                            : line.type === 'deleted'
-                              ? isLightTheme
-                                ? '#ef4444'
-                                : '#f87171'
+                                ? '#ffebe9'  // GitHub light red background
+                                : '#2e1e1f'  // GitHub dark red background
                               : 'transparent'
 
                         const textColor =
                           line.type === 'added'
                             ? isLightTheme
-                              ? '#166534'
-                              : '#86efac'
+                              ? '#1f2328'  // GitHub dark text on light
+                              : '#adbac7'  // GitHub light text on dark
                             : line.type === 'deleted'
                               ? isLightTheme
-                                ? '#991b1b'
-                                : '#fca5a5'
-                              : theme.text.secondary
+                                ? '#1f2328'
+                                : '#adbac7'
+                              : isLightTheme
+                                ? '#1f2328'
+                                : '#adbac7'
+
+                        const lineNumberBg =
+                          line.type === 'added'
+                            ? isLightTheme
+                              ? '#ccffd8'  // Darker green for line numbers
+                              : '#113221'
+                            : line.type === 'deleted'
+                              ? isLightTheme
+                                ? '#ffd7d5'  // Darker red for line numbers
+                                : '#3a1418'
+                              : 'transparent'
+
+                        const lineNumberColor = isLightTheme ? '#57606a' : '#6e7681'
+
+                        const signColor =
+                          line.type === 'added'
+                            ? isLightTheme
+                              ? '#1a7f37'  // GitHub green plus sign
+                              : '#3fb950'
+                            : line.type === 'deleted'
+                              ? isLightTheme
+                                ? '#cf222e'  // GitHub red minus sign
+                                : '#f85149'
+                              : 'transparent'
 
                         return (
                           <div
-                            className="flex items-start cursor-text select-text hover:brightness-95"
+                            className="flex items-start hover:bg-opacity-80"
+                            key={lineKey}
                             style={{
                               backgroundColor: bgColor,
-                              borderLeft:
-                                line.type !== 'context'
-                                  ? `2px solid ${borderColor}`
-                                  : 'none',
                             }}
-                            key={lineKey}
                           >
-                            <span
-                              className="flex-shrink-0 text-right px-2 select-none"
+                            {/* Line numbers section */}
+                            <div
+                              className="flex-shrink-0 select-none flex"
                               style={{
-                                width: '70px',
-                                color: theme.text.muted,
+                                backgroundColor: lineNumberBg || (isLightTheme ? '#ffffff' : '#0d1117'),
                               }}
                             >
-                              <span className="inline-block w-7 text-right">
+                              {/* Old line number */}
+                              <span
+                                className="inline-block text-right px-2 py-0.5"
+                                style={{
+                                  width: '50px',
+                                  color: lineNumberColor,
+                                  fontSize: '12px',
+                                  lineHeight: '20px',
+                                }}
+                              >
                                 {line.type === 'deleted' || line.type === 'context'
                                   ? line.oldLineNumber || ''
                                   : ''}
                               </span>
-                              <span className="inline-block w-7 text-right ml-1">
+                              {/* New line number */}
+                              <span
+                                className="inline-block text-right px-2 py-0.5"
+                                style={{
+                                  width: '50px',
+                                  color: lineNumberColor,
+                                  fontSize: '12px',
+                                  lineHeight: '20px',
+                                  borderLeft: isLightTheme ? '1px solid #d0d7de' : '1px solid #30363d',
+                                }}
+                              >
                                 {line.type === 'added' || line.type === 'context'
                                   ? line.newLineNumber || ''
                                   : ''}
                               </span>
-                            </span>
+                            </div>
+
+                            {/* Content section */}
                             <pre
-                              className="flex-1 px-3 py-0.5 m-0 whitespace-pre-wrap break-all"
+                              className="flex-1 px-2 py-0.5 m-0 whitespace-pre overflow-x-visible cursor-text select-text"
                               style={{
                                 color: textColor,
-                                fontFamily: 'inherit',
+                                fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+                                fontSize: '12px',
+                                lineHeight: '20px',
                               }}
                             >
+                              {line.type === 'added' && (
+                                <span style={{ color: signColor, marginRight: '4px' }}>+</span>
+                              )}
+                              {line.type === 'deleted' && (
+                                <span style={{ color: signColor, marginRight: '4px' }}>-</span>
+                              )}
+                              {line.type === 'context' && (
+                                <span style={{ marginRight: '4px', opacity: 0 }}>·</span>
+                              )}
                               {line.content}
                             </pre>
                           </div>

@@ -30,6 +30,12 @@ export default {
     output: `dist/v${version}`,
   },
 
+  publish: {
+    provider: 'github',
+    owner: 'AlmondCoder',
+    repo: 'almondcoder',
+  },
+
   mac: {
     artifactName,
     icon: `${resources}/build/icons/icon.icns`,

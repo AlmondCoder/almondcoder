@@ -171,10 +171,14 @@ export function PromptInput({
               ? 'text-gray-900 placeholder-gray-400'
               : 'text-white placeholder-gray-500'
           }`}
-          style={{ fontSize: isNewConversation ? '0.875rem' : undefined }}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={isNewConversation ? 'Enter your prompt here...' : 'Do something else'}
+          placeholder={
+            isNewConversation
+              ? 'Enter your prompt here...'
+              : 'Do something else'
+          }
+          style={{ fontSize: isNewConversation ? '0.875rem' : undefined }}
           value={currentPrompt}
         />
 
