@@ -1,7 +1,7 @@
 <div align="center">
 
  ![Image](https://avatars.githubusercontent.com/u/232196805?s=400&u=6401ccc6274b97becdcbe02f1bc88ba2b98bbe03&v=4) 
-# AlmondCoder
+# almondCoder
 
 ### AI-powered coding assistant with Git integration
 
