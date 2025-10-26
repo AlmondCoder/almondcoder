@@ -197,6 +197,9 @@ export function ConversationView({
   const [selectedWorktree, setSelectedWorktree] = useState<string | null>(null)
   const [isAutoAcceptEnabled, setIsAutoAcceptEnabled] = useState(false)
 
+  const [isWorktreeValid, setIsWorktreeValid] = useState<boolean>(true)
+  const [isConversationLogValid, setIsConversationLogValid] = useState<boolean>(true)
+
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null)
   const selectedConversationRef = useRef(selectedConversation)
@@ -273,6 +276,56 @@ export function ConversationView({
     isNewConversation,
     projectContext?.projectPath,
     selectedConversation.projectPath,
+  ])
+
+  // Validate worktree and conversation log existence for existing conversations
+  useEffect(() => {
+    const validateConversation = async () => {
+      // Skip validation for new conversations
+      if (isNewConversation) {
+        setIsWorktreeValid(true)
+        setIsConversationLogValid(true)
+        return
+      }
+
+      // Validate worktree path if it exists
+      if (selectedConversation.worktreePath) {
+        try {
+          const result = await window.App.validateWorktree(
+            selectedConversation.worktreePath
+          )
+          setIsWorktreeValid(result.isValid)
+        } catch (error) {
+          console.error('Error validating worktree:', error)
+          setIsWorktreeValid(false)
+        }
+      } else {
+        // No worktree path means it was never created or has been removed
+        setIsWorktreeValid(false)
+      }
+
+      // Validate conversation log path if it exists
+      if (selectedConversation.conversationLogPath) {
+        try {
+          const result = await window.App.checkFileExists(
+            selectedConversation.conversationLogPath
+          )
+          setIsConversationLogValid(result.exists)
+        } catch (error) {
+          console.error('Error checking conversation log:', error)
+          setIsConversationLogValid(false)
+        }
+      } else {
+        setIsConversationLogValid(false)
+      }
+    }
+
+    validateConversation()
+  }, [
+    selectedConversation.promptId,
+    selectedConversation.worktreePath,
+    selectedConversation.conversationLogPath,
+    isNewConversation,
   ])
 
   // Load conversation messages from the conversation log file (for existing conversations)
@@ -1989,7 +2042,17 @@ export function ConversationView({
       )}
 
       {/* Input Area - Show for existing conversations (with or without messages) */}
-      {!isNewConversation && (
+      {!isNewConversation && !isWorktreeValid ? (
+        /* Show message when worktree doesn't exist - centered in full input height */
+        <div className="flex-shrink-0 flex items-center justify-center" style={{ minHeight: '160px' }}>
+          <p
+            className="text-center text-sm"
+            style={{ color: theme.text.tertiary }}
+          >
+            You can no longer edit this prompt as it is already merged or deleted
+          </p>
+        </div>
+      ) : !isNewConversation && (
         <div className="flex-shrink-0">
           {/* Status Bar - Above Input */}
           {/* ================================================================ */}

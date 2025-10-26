@@ -88,6 +88,8 @@ const API = {
     ipcRenderer.invoke('cleanup-worktree', worktreePath),
   validateWorktree: (worktreePath: string) =>
     ipcRenderer.invoke('validate-worktree', worktreePath),
+  checkFileExists: (filePath: string) =>
+    ipcRenderer.invoke('check-file-exists', filePath),
   getProjectWorktrees: (projectPath: string) =>
     ipcRenderer.invoke('get-project-worktrees', projectPath),
   getWorktreeBranches: (projectPath: string) =>

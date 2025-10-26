@@ -1165,6 +1165,24 @@ ipcMain.handle('validate-worktree', async (event, worktreePath) => {
   }
 })
 
+// Check if a file exists
+ipcMain.handle('check-file-exists', async (event, filePath) => {
+  try {
+    const exists = existsSync(filePath)
+    return {
+      success: true,
+      exists,
+    }
+  } catch (error: any) {
+    console.error('Error in check-file-exists IPC handler:', error)
+    return {
+      success: false,
+      error: error.message,
+      exists: false,
+    }
+  }
+})
+
 // Helper function to get worktree information from git for a specific branch
 async function getWorktreeInfoFromGit(
   projectPath: string,
@@ -2029,7 +2047,14 @@ makeAppWithSingleInstanceLock(async () => {
   await app.whenReady()
 
   // Create tray icon
-  const trayIconPath = join(app.getAppPath(), 'src/resources/public/trayIconTemplate.png')
+  // In development, resources are in src/resources/public
+  // In production, resources are copied to the app's resources folder
+  const isDev = !app.isPackaged
+  const trayIconPath = isDev
+    ? join(process.cwd(), 'src/resources/public/trayIconTemplate.png')
+    : join(process.resourcesPath, 'public/trayIconTemplate.png')
+
+  console.log('Tray icon path:', trayIconPath)
   const trayIcon = nativeImage.createFromPath(trayIconPath)
   trayIcon.setTemplateImage(true) // Enable macOS template mode
   tray = new Tray(trayIcon)

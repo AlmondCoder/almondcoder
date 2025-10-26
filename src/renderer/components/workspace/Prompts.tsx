@@ -601,7 +601,7 @@ export function Prompts({ projectContext }: PromptsProps) {
         <h3
           className={`text-md font-semibold mb-4 ${themeClasses.textPrimary}`}
         >
-          Your Prompts
+          Your Git WorkTrees
         </h3>
 
         {/* Existing Prompts */}

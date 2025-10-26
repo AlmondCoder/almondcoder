@@ -164,8 +164,8 @@ export function PromptInput({
       {/* Textarea with bottom controls */}
       <div className="relative">
         <textarea
-          className={`w-full p-4 pb-16 outline-none bg-transparent resize-none focus:outline-none ${
-            isNewConversation ? 'min-h-[120px]' : 'h-32 min-h-[128px]'
+          className={`w-full p-4 pb-0 outline-none bg-transparent resize-none focus:outline-none ${
+            isNewConversation ? 'min-h-[120px] max-h-[120px]' : 'h-[70px] max-h-[70px]'
           } ${
             isLightTheme
               ? 'text-gray-900 placeholder-gray-400'
@@ -178,9 +178,16 @@ export function PromptInput({
               ? 'Enter your prompt here...'
               : 'Do something else'
           }
-          style={{ fontSize: isNewConversation ? '0.875rem' : undefined }}
+          style={{
+            fontSize: isNewConversation ? '0.875rem' : undefined,
+            overflowY: 'auto',
+            paddingBottom: '4px'
+          }}
           value={currentPrompt}
         />
+
+        {/* Spacer to push controls down and create visual separation */}
+        <div className="h-[58px]"></div>
 
         {/* Bottom bar with controls */}
         <div className="absolute left-0 right-0 bottom-0 px-3 pb-3 flex items-center justify-between gap-2">
