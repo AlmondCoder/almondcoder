@@ -4,7 +4,6 @@ import { MessageSquare, GitMerge, FolderOpen, User } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
 import { Overview } from '../components/workspace/Overview'
 import { Prompts } from '../components/workspace/Prompts'
-import { Terminal as TerminalComponent } from '../components/workspace/Terminal'
 import { Settings as SettingsComponent } from '../components/workspace/Settings'
 
 interface LocationState {
@@ -39,46 +38,10 @@ export function WorkspaceScreen() {
     }
   }, [projectContext?.projectPath])
   const [activeSection, setActiveSection] = useState('prompts')
-  const [message, setMessage] = useState('')
-  const [chatHistory, setChatHistory] = useState([
-    {
-      id: 1,
-      sender: 'assistant',
-      content:
-        "Hello! I'm ready to help you with your project. What would you like to work on?",
-      timestamp: new Date(),
-    },
-  ])
-
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!message.trim()) return
-
-    const newMessage = {
-      id: chatHistory.length + 1,
-      sender: 'user' as const,
-      content: message,
-      timestamp: new Date(),
-    }
-
-    setChatHistory(prev => [...prev, newMessage])
-    setMessage('')
-
-    // Simulate assistant response
-    setTimeout(() => {
-      const assistantMessage = {
-        id: chatHistory.length + 2,
-        sender: 'assistant' as const,
-        content: `I received your message: "${message}". How can I help you with that?`,
-        timestamp: new Date(),
-      }
-      setChatHistory(prev => [...prev, assistantMessage])
-    }, 1000)
-  }
 
   const topMenuItems = [
     { icon: MessageSquare, label: 'Prompts', key: 'prompts' },
-    { icon: GitMerge, label: 'Merge', key: 'merge' }
+    { icon: GitMerge, label: 'Merge', key: 'merge' },
   ]
 
   const bottomMenuItems = [{ icon: User, label: 'Account', key: 'account' }]

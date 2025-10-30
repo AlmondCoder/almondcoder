@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   BrowserWindow,
+  shell,
 } from 'electron'
 import { join, basename } from 'node:path'
 import {
@@ -76,6 +77,43 @@ const saveRecentProjects = (projects: any[]) => {
     writeFileSync(filePath, JSON.stringify(projects, null, 2))
   } catch (error) {
     console.error('Error saving recent projects:', error)
+  }
+}
+
+// Prompt Agents persistence functions
+const getAgentsFilePath = () => {
+  const appDataPath = join(homedir(), '.almondcoder')
+  const agentsDir = join(appDataPath, 'agents')
+  if (!existsSync(agentsDir)) {
+    mkdirSync(agentsDir, { recursive: true })
+  }
+  return join(agentsDir, 'prompts.json')
+}
+
+const loadPromptAgents = () => {
+  try {
+    const filePath = getAgentsFilePath()
+    if (existsSync(filePath)) {
+      const data = readFileSync(filePath, 'utf8')
+      const parsed = JSON.parse(data)
+      return parsed.map((agent: any) => ({
+        ...agent,
+        createdAt: new Date(agent.createdAt),
+        updatedAt: new Date(agent.updatedAt),
+      }))
+    }
+  } catch (error) {
+    console.error('Error loading prompt agents:', error)
+  }
+  return []
+}
+
+const savePromptAgents = (agents: any[]) => {
+  try {
+    const filePath = getAgentsFilePath()
+    writeFileSync(filePath, JSON.stringify(agents, null, 2))
+  } catch (error) {
+    console.error('Error saving prompt agents:', error)
   }
 }
 
@@ -398,6 +436,16 @@ ipcMain.handle('get-recent-projects', () => {
 
 ipcMain.handle('get-app-data-path', () => {
   return join(homedir(), '.almondcoder')
+})
+
+// Prompt Agents IPC handlers
+ipcMain.handle('get-prompt-agents', () => {
+  return loadPromptAgents()
+})
+
+ipcMain.handle('save-prompt-agents', (event, agents) => {
+  savePromptAgents(agents)
+  return true
 })
 
 ipcMain.handle('add-recent-project', (event, project) => {
@@ -2040,6 +2088,100 @@ ipcMain.on(
     updateConversationState(data.promptId, data.updates)
   }
 )
+
+// ============================================================================
+// Authentication Check IPC Handlers
+// ============================================================================
+// LOGIC: Check if Claude Agent SDK is authenticated by running a minimal test query
+// If the query succeeds, authentication is working. If it fails, user needs to login.
+
+/**
+ * Check if Claude Agent SDK is authenticated
+ * Returns { authenticated: boolean, error?: string }
+ */
+ipcMain.handle('check-claude-authentication', async () => {
+  try {
+    console.log('🔐 [Auth Check] Testing Claude SDK authentication...')
+
+    // Import query function from SDK
+    const { query } = await import('@anthropic-ai/claude-agent-sdk')
+
+    // Run a minimal test query with very short prompt and no tools
+    // This will fail if not authenticated or if SDK is not working
+    const testQuery = query({
+      prompt: 'test',
+      options: {
+        cwd: '/tmp',
+        allowedTools: [],
+        permissionMode: 'bypassPermissions',
+      },
+    })
+
+    // Try to get first message - if this succeeds, we're authenticated
+    const firstMessage = await testQuery.next()
+
+    if (firstMessage.done === false) {
+      console.log('✅ [Auth Check] Claude SDK is authenticated')
+      return { authenticated: true }
+    }
+
+    // If done immediately, something went wrong
+    console.log('❌ [Auth Check] Test query completed without messages')
+    return {
+      authenticated: false,
+      error: 'SDK returned no messages'
+    }
+  } catch (error: any) {
+    console.error('❌ [Auth Check] Authentication check failed:', error)
+
+    // Check for specific authentication errors
+    const errorMessage = error?.message || String(error)
+    const isAuthError =
+      errorMessage.includes('authentication') ||
+      errorMessage.includes('API key') ||
+      errorMessage.includes('unauthorized') ||
+      errorMessage.includes('401')
+
+    return {
+      authenticated: false,
+      error: isAuthError ? 'Not authenticated' : errorMessage
+    }
+  }
+})
+
+/**
+ * Get the login URL for Claude authentication
+ * This launches the setup-token flow which provides a login URL
+ */
+ipcMain.handle('get-claude-login-url', async () => {
+  try {
+    console.log('🔗 [Auth] Getting Claude login URL...')
+
+    // The setup-token command generates a login URL
+    // For now, we'll return the claude.com URL
+    // TODO: Extract actual URL from setup-token command if needed
+    const loginUrl = 'https://claude.ai/login'
+
+    console.log('✅ [Auth] Login URL:', loginUrl)
+    return { url: loginUrl }
+  } catch (error: any) {
+    console.error('❌ [Auth] Failed to get login URL:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Open an external URL in the default browser
+ */
+ipcMain.handle('open-external-url', async (event, url: string) => {
+  try {
+    await shell.openExternal(url)
+    return { success: true }
+  } catch (error: any) {
+    console.error('❌ [Auth] Failed to open URL:', error)
+    return { error: error?.message || String(error) }
+  }
+})
 
 let tray: Tray | null = null
 

@@ -1,11 +1,88 @@
-import { useState, useEffect } from 'react'
-import { Save, Brain, Sparkles } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { useState, useEffect, useRef } from 'react'
+import { Save, Brain, Sparkles, Loader2 } from 'lucide-react'
+import { Crepe } from '@milkdown/crepe'
+import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
+import '@milkdown/crepe/theme/common/style.css'
+import '@milkdown/crepe/theme/frame.css'
+
+// Prompt for generating CLAUDE.md via Claude Code workflow
+const GENERATE_CLAUDE_MD_PROMPT = `Please analyze this codebase thoroughly and generate a comprehensive CLAUDE.md file for project memory.
+
+Include these sections:
+
+1. **Project Overview** - What this project does, key technologies used, package manager, and purpose
+
+2. **Development Commands** - How to run, build, test, and lint the project
+
+3. **Architecture** - Process architecture (Electron main/renderer/preload), key files and directories, data flow patterns
+
+4. **Important Implementation Notes** - Critical patterns, gotchas, configuration details, IPC communication patterns
+
+5. **Type System** - Key interfaces and type definitions location
+
+6. **Build Configuration** - Build tools, output targets, platform support
+
+Be thorough and technical. Focus on information that would help an AI assistant understand and work with this codebase effectively.
+
+Write the file to CLAUDE.md in the project root.`
 
 interface ProjectMemoryProps {
   projectPath: string
+}
+
+// Crepe Editor Component
+function CrepeEditor({
+  content,
+  onContentChange,
+  isLightTheme,
+}: {
+  content: string
+  onContentChange: (markdown: string) => void
+  isLightTheme: boolean
+}) {
+  const { get } = useEditor((root) => {
+    const crepe = new Crepe({
+      root,
+      defaultValue: content,
+      features: {
+        [Crepe.Feature.CodeMirror]: true,
+        [Crepe.Feature.ListItem]: true,
+        [Crepe.Feature.BlockEdit]: true,
+        [Crepe.Feature.Clipboard]: true,
+        [Crepe.Feature.Cursor]: true,
+        [Crepe.Feature.LinkTooltip]: true,
+        [Crepe.Feature.ImageBlock]: true,
+        [Crepe.Feature.Toolbar]: true,
+        [Crepe.Feature.LaTeX]: false,
+      },
+    })
+
+    // Listen to content changes
+    crepe.editor.onStatusChange((status) => {
+      if (status === 'ready') {
+        crepe.editor.action((ctx) => {
+          const listener = ctx.get(crepe.listener)
+          listener.markdownUpdated((ctx, markdown) => {
+            onContentChange(markdown)
+          })
+        })
+      }
+    })
+
+    return crepe.editor
+  })
+
+  return (
+    <div
+      className={`milkdown-crepe-editor h-full ${
+        isLightTheme ? 'crepe-theme-light' : 'crepe-theme-dark'
+      }`}
+      data-theme={isLightTheme ? 'light' : 'dark'}
+    >
+      <Milkdown />
+    </div>
+  )
 }
 
 export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
@@ -15,8 +92,11 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
 
   const [markdownContent, setMarkdownContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [isLoaded, setIsLoaded] = useState(false)
+  const contentRef = useRef('')
 
   // Load project memory when component mounts or project changes
   useEffect(() => {
@@ -25,15 +105,30 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
 
       try {
         const content = await window.App.readProjectMemory(projectPath)
-        setMarkdownContent(content || '')
+        const loadedContent =
+          content ||
+          '# Project Memory\n\nStart writing your project notes here...'
+        setMarkdownContent(loadedContent)
+        contentRef.current = loadedContent
+        setIsLoaded(true)
       } catch (error) {
         console.error('Error loading project memory:', error)
-        setMarkdownContent('')
+        const defaultContent =
+          '# Project Memory\n\nStart writing your project notes here...'
+        setMarkdownContent(defaultContent)
+        contentRef.current = defaultContent
+        setIsLoaded(true)
       }
     }
 
+    setIsLoaded(false)
     loadProjectMemory()
   }, [projectPath])
+
+  // Handle content changes from editor
+  const handleContentChange = (markdown: string) => {
+    contentRef.current = markdown
+  }
 
   // Save project memory
   const handleSave = async () => {
@@ -47,7 +142,8 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
     setSaveMessage(null)
 
     try {
-      await window.App.saveProjectMemory(projectPath, markdownContent)
+      const currentContent = contentRef.current
+      await window.App.saveProjectMemory(projectPath, currentContent)
       setLastSaved(new Date())
       setSaveMessage('Saved successfully!')
       setTimeout(() => setSaveMessage(null), 3000)
@@ -57,6 +153,55 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
       setTimeout(() => setSaveMessage(null), 3000)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  // Generate CLAUDE.md using Claude Code workflow
+  const handleGenerate = async () => {
+    if (!projectPath) {
+      setSaveMessage('No project selected')
+      setTimeout(() => setSaveMessage(null), 3000)
+      return
+    }
+
+    setIsGenerating(true)
+    setSaveMessage('Generating CLAUDE.md with AI...')
+
+    try {
+      // Execute Claude SDK with the generation prompt
+      await window.App.executeClaudeSDK(
+        {
+          prompt: GENERATE_CLAUDE_MD_PROMPT,
+          workingDirectory: projectPath,
+          allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+          permissionMode: 'acceptEdits',
+        },
+        (output) => {
+          // Optional: Log streaming progress
+          console.log('Generation progress:', output)
+        }
+      )
+
+      // Wait a moment for file system to settle
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+
+      // Reload the content from the newly generated file
+      const content = await window.App.readProjectMemory(projectPath)
+      if (content) {
+        setMarkdownContent(content)
+        contentRef.current = content
+        setSaveMessage('CLAUDE.md generated successfully!')
+      } else {
+        setSaveMessage('Generation completed, but file may be empty')
+      }
+
+      setTimeout(() => setSaveMessage(null), 3000)
+    } catch (error) {
+      console.error('Failed to generate CLAUDE.md:', error)
+      setSaveMessage('Failed to generate CLAUDE.md')
+      setTimeout(() => setSaveMessage(null), 3000)
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -71,7 +216,7 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [markdownContent, projectPath])
+  }, [projectPath])
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
@@ -110,15 +255,17 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
               isLightTheme
                 ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700'
                 : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600'
-            }`}
-            disabled={!projectPath}
-            onClick={() => {
-              console.log('Generate button clicked - backend to be implemented')
-            }}
+            } ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={!projectPath || isGenerating}
+            onClick={handleGenerate}
             title="AI Generate Memory"
           >
-            <Sparkles className="w-4 h-4" />
-            Generate
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating...' : 'Generate'}
           </button>
           <button
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
@@ -140,195 +287,26 @@ export function ProjectMemory({ projectPath }: ProjectMemoryProps) {
         </div>
       </div>
 
-      {/* Split View - Editor and Preview */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Side - Markdown Editor */}
-        <div
-          className={`w-1/2 border-r ${themeClasses.borderPrimary} flex flex-col overflow-hidden`}
-        >
+      {/* Crepe Editor */}
+      <div className="flex-1 overflow-hidden">
+        {!isLoaded ? (
           <div
-            className={`px-4 py-2 text-xs font-medium ${themeClasses.textSecondary} border-b ${themeClasses.borderPrimary} flex-shrink-0`}
+            className={`flex items-center justify-center h-full ${themeClasses.textTertiary}`}
           >
-            EDITOR
+            <div className="text-center">
+              <Brain className="w-16 h-16 mx-auto mb-4 opacity-30 animate-pulse" />
+              <p className="text-lg">Loading...</p>
+            </div>
           </div>
-          <textarea
-            className={`flex-1 w-full p-6 resize-none focus:outline-none font-mono text-sm leading-relaxed ${
-              isLightTheme
-                ? 'bg-white text-gray-900 placeholder-gray-400'
-                : 'bg-gray-900 text-gray-100 placeholder-gray-500'
-            } overflow-y-auto`}
-            onChange={e => setMarkdownContent(e.target.value)}
-            placeholder="# Project Memory
-
-Write your project notes, architecture decisions, important context, and anything you want to remember about this project...
-
-## Example Sections
-
-### Architecture Overview
-Describe your project structure here...
-
-### Key Decisions
-- Decision 1: Why we chose X over Y
-- Decision 2: Important tradeoffs
-
-### Important Context
-Things the AI should know when working on this project..."
-            spellCheck={false}
-            value={markdownContent}
-          />
-        </div>
-
-        {/* Right Side - Markdown Preview */}
-        <div
-          className={`w-1/2 flex flex-col overflow-hidden ${isLightTheme ? 'bg-gray-50' : 'bg-gray-900'}`}
-        >
-          <div
-            className={`px-4 py-2 text-xs font-medium ${themeClasses.textSecondary} border-b ${themeClasses.borderPrimary} flex-shrink-0`}
-          >
-            PREVIEW
-          </div>
-          <div
-            className={`flex-1 overflow-y-auto p-6 ${isLightTheme ? 'bg-white' : 'bg-gray-900'}`}
-          >
-            {markdownContent ? (
-              <div
-                className={`markdown-preview max-w-4xl mx-auto ${
-                  isLightTheme ? 'text-gray-900' : 'text-gray-100'
-                }`}
-              >
-                <ReactMarkdown
-                  components={{
-                    h1: ({ node, ...props }) => (
-                      <h1
-                        className={`text-4xl font-bold mb-6 mt-8 ${isLightTheme ? 'text-gray-900' : 'text-white'}`}
-                        {...props}
-                      />
-                    ),
-                    h2: ({ node, ...props }) => (
-                      <h2
-                        className={`text-3xl font-bold mb-4 mt-6 ${isLightTheme ? 'text-gray-900' : 'text-white'}`}
-                        {...props}
-                      />
-                    ),
-                    h3: ({ node, ...props }) => (
-                      <h3
-                        className={`text-2xl font-semibold mb-3 mt-5 ${isLightTheme ? 'text-gray-800' : 'text-gray-100'}`}
-                        {...props}
-                      />
-                    ),
-                    h4: ({ node, ...props }) => (
-                      <h4
-                        className={`text-xl font-semibold mb-2 mt-4 ${isLightTheme ? 'text-gray-800' : 'text-gray-100'}`}
-                        {...props}
-                      />
-                    ),
-                    h5: ({ node, ...props }) => (
-                      <h5
-                        className={`text-lg font-semibold mb-2 mt-3 ${isLightTheme ? 'text-gray-800' : 'text-gray-100'}`}
-                        {...props}
-                      />
-                    ),
-                    h6: ({ node, ...props }) => (
-                      <h6
-                        className={`text-base font-semibold mb-2 mt-3 ${isLightTheme ? 'text-gray-800' : 'text-gray-100'}`}
-                        {...props}
-                      />
-                    ),
-                    p: ({ node, ...props }) => (
-                      <p
-                        className={`mb-4 leading-relaxed ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}
-                        {...props}
-                      />
-                    ),
-                    ul: ({ node, ...props }) => (
-                      <ul
-                        className={`list-disc list-outside ml-6 mb-4 ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}
-                        {...props}
-                      />
-                    ),
-                    ol: ({ node, ...props }) => (
-                      <ol
-                        className={`list-decimal list-outside ml-6 mb-4 ${isLightTheme ? 'text-gray-700' : 'text-gray-300'}`}
-                        {...props}
-                      />
-                    ),
-                    li: ({ node, ...props }) => (
-                      <li className="mb-2 leading-relaxed" {...props} />
-                    ),
-                    pre: ({ node, ...props }) => (
-                      <pre
-                        className={`rounded-lg overflow-hidden mb-4 ${
-                          isLightTheme ? 'bg-gray-100' : 'bg-gray-800'
-                        }`}
-                        {...props}
-                      />
-                    ),
-                    blockquote: ({ node, ...props }) => (
-                      <blockquote
-                        className={`border-l-4 pl-4 italic mb-4 ${
-                          isLightTheme
-                            ? 'border-gray-300 text-gray-600'
-                            : 'border-gray-600 text-gray-400'
-                        }`}
-                        {...props}
-                      />
-                    ),
-                    a: ({ node, ...props }) => (
-                      <a
-                        className={`underline ${isLightTheme ? 'text-purple-600 hover:text-purple-800' : 'text-purple-400 hover:text-purple-300'}`}
-                        {...props}
-                      />
-                    ),
-                    table: ({ node, ...props }) => (
-                      <div className="overflow-x-auto mb-4">
-                        <table
-                          className={`min-w-full border ${isLightTheme ? 'border-gray-300' : 'border-gray-700'}`}
-                          {...props}
-                        />
-                      </div>
-                    ),
-                    th: ({ node, ...props }) => (
-                      <th
-                        className={`border px-4 py-2 text-left font-semibold ${
-                          isLightTheme
-                            ? 'border-gray-300 bg-gray-100'
-                            : 'border-gray-700 bg-gray-800'
-                        }`}
-                        {...props}
-                      />
-                    ),
-                    td: ({ node, ...props }) => (
-                      <td
-                        className={`border px-4 py-2 ${
-                          isLightTheme ? 'border-gray-300' : 'border-gray-700'
-                        }`}
-                        {...props}
-                      />
-                    ),
-                    hr: ({ node, ...props }) => (
-                      <hr
-                        className={`my-8 ${isLightTheme ? 'border-gray-300' : 'border-gray-700'}`}
-                        {...props}
-                      />
-                    ),
-                  }}
-                  remarkPlugins={[remarkGfm]}
-                >
-                  {markdownContent}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <div
-                className={`flex items-center justify-center h-full ${themeClasses.textTertiary}`}
-              >
-                <div className="text-center">
-                  <Brain className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                  <p className="text-lg">Start writing to see the preview</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        ) : (
+          <MilkdownProvider key={markdownContent}>
+            <CrepeEditor
+              content={markdownContent}
+              onContentChange={handleContentChange}
+              isLightTheme={isLightTheme}
+            />
+          </MilkdownProvider>
+        )}
       </div>
     </div>
   )

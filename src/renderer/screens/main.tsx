@@ -22,13 +22,36 @@ export function MainScreen() {
     }>
   >([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false)
   const navigate = useNavigate()
 
+  // Check authentication on mount
   useEffect(() => {
-    App.sayHelloFromBridge()
-    loadRecentProjects()
+    checkAuthenticationStatus()
   }, [])
+
+  const checkAuthenticationStatus = async () => {
+    try {
+      const result = await App.checkClaudeAuthentication()
+
+      if (!result.authenticated) {
+        // Not authenticated, redirect to auth gate
+        navigate('/auth-gate')
+        return
+      }
+
+      // Authenticated, continue loading
+      App.sayHelloFromBridge()
+      loadRecentProjects()
+    } catch (error) {
+      console.error('Failed to check authentication:', error)
+      // On error, redirect to auth gate to be safe
+      navigate('/auth-gate')
+    } finally {
+      setIsCheckingAuth(false)
+    }
+  }
 
   const loadRecentProjects = async () => {
     try {
@@ -172,6 +195,26 @@ export function MainScreen() {
     }
   }
 
+  // Show loading state while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <div
+        className={`min-h-screen ${themeClasses.bgPrimary} flex items-center justify-center`}
+      >
+        <div className="text-center">
+          <img
+            alt="almondCoder"
+            className="w-16 h-16 mx-auto mb-4 opacity-50"
+            src="/logo.svg"
+          />
+          <p className={`text-lg ${themeClasses.textSecondary}`}>
+            Checking authentication...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`min-h-screen ${themeClasses.bgPrimary} relative`}>
       {/* Main Content - Centered */}
@@ -184,7 +227,7 @@ export function MainScreen() {
             Almond Coder
           </h1>
           <p className={`text-xl ${themeClasses.textSecondary} mb-4`}>
-            Become a 100x developer with tools you already love
+            The VibeCoding Cleaner.
           </p>
           <p
             className={`text-base ${themeClasses.textMuted} max-w-3xl mx-auto`}

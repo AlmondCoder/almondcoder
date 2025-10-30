@@ -1,14 +1,15 @@
-import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Trash2, Pencil } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import type { PromptAgent } from '../../../shared/types'
 
 interface AgentViewProps {
   agents: PromptAgent[]
   setAgents: (agents: PromptAgent[]) => void
+  triggerNewAgent?: boolean
 }
 
-export function AgentView({ agents, setAgents }: AgentViewProps) {
+export function AgentView({ agents, setAgents, triggerNewAgent }: AgentViewProps) {
   const { theme, themeName } = useTheme()
   const themeClasses = createThemeClasses(theme)
   const isLightTheme = themeName === 'light'
@@ -30,6 +31,13 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
     setEditingAgent(null)
   }
 
+  // React to triggerNewAgent prop from parent
+  useEffect(() => {
+    if (triggerNewAgent) {
+      handleCreateNewAgent()
+    }
+  }, [triggerNewAgent])
+
   const handleSaveNewAgent = () => {
     if (newAgent.name.trim() && newAgent.systemPrompt.trim()) {
       const agent: PromptAgent = {
@@ -40,7 +48,7 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
         createdAt: new Date(),
         updatedAt: new Date(),
       }
-      setAgents([...agents, agent])
+      setAgents([agent, ...agents])
       setIsCreatingNew(false)
       setNewAgent({ name: '', systemPrompt: '', tools: [] })
     }
@@ -51,321 +59,207 @@ export function AgentView({ agents, setAgents }: AgentViewProps) {
     setNewAgent({ name: '', systemPrompt: '', tools: [] })
   }
 
+  const handleDeleteAgent = (agentId: string) => {
+    setAgents(agents.filter(a => a.id !== agentId))
+  }
+
+  const handleStartEdit = (agent: PromptAgent) => {
+    setEditingAgentId(agent.id)
+    setEditingAgent({ ...agent })
+    setIsCreatingNew(false)
+  }
+
+  const handleSaveEdit = () => {
+    if (editingAgent) {
+      setAgents(
+        agents.map(a =>
+          a.id === editingAgent.id
+            ? { ...editingAgent, updatedAt: new Date() }
+            : a
+        )
+      )
+      setEditingAgentId(null)
+      setEditingAgent(null)
+    }
+  }
+
+  const formatDate = (date: Date) => {
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return 'just now'
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
+
+    const day = date.getDate()
+    const month = date.toLocaleDateString('en-US', { month: 'long' })
+    return `${day} ${month}`
+  }
+
   return (
     <div className="h-full flex flex-col">
-      {/* Header with Create New Agent Button */}
-      <div className="flex items-center justify-between mb-4 pb-3">
-        <button
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            isLightTheme
-              ? 'bg-black text-white hover:bg-gray-800'
-              : 'bg-white text-black hover:bg-gray-200'
-          }`}
-          disabled={isCreatingNew}
-          onClick={handleCreateNewAgent}
-        >
-          <Plus className="w-4 h-4" />
-          New Agent
-        </button>
-      </div>
-
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-        {/* Create New Agent Form */}
-        {isCreatingNew && (
-          <div
-            className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-6`}
-          >
-            <div className="space-y-4">
-              <div>
-                <label
-                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                >
-                  Agent Name
-                </label>
+      {/* Grid Layout */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
+          {/* Create New Agent Card */}
+          {isCreatingNew && (
+            <div
+              className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-4 flex flex-col h-[280px]`}
+            >
+              <div className="flex items-center justify-between mb-4">
                 <input
                   autoFocus
-                  className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus}`}
+                  className={`flex-1 ${themeClasses.bgPrimary} border-none rounded px-2 py-1 ${themeClasses.textPrimary} focus:outline-none text-base font-semibold`}
                   onChange={e => {
                     setNewAgent({ ...newAgent, name: e.target.value })
                   }}
-                  placeholder="Enter agent name"
+                  placeholder="Title"
                   type="text"
                   value={newAgent.name}
                 />
+                <div className="flex items-center gap-2 ml-2">
+                  <button
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      isLightTheme
+                        ? 'bg-black text-white hover:bg-gray-800'
+                        : 'bg-white text-black hover:bg-gray-200'
+                    }`}
+                    onClick={handleSaveNewAgent}
+                  >
+                    Save
+                  </button>
+                  <button
+                    className={`p-1 rounded hover:${themeClasses.bgInput} transition-colors`}
+                    onClick={handleCancelNewAgent}
+                  >
+                    <Trash2 className={`w-4 h-4 ${themeClasses.textSecondary}`} />
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <label
-                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                >
-                  System Prompt
+              <div className="flex-1 overflow-hidden">
+                <label className={`text-xs font-semibold ${themeClasses.textSecondary} mb-2 block`}>
+                  Prompt
                 </label>
                 <textarea
-                  className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus} min-h-[120px]`}
+                  className={`w-full h-[160px] ${themeClasses.bgPrimary} border-none rounded p-2 ${themeClasses.textPrimary} focus:outline-none text-sm resize-none`}
                   onChange={e => {
                     setNewAgent({ ...newAgent, systemPrompt: e.target.value })
                   }}
-                  placeholder="Enter system prompt for this agent"
+                  placeholder="Quick templates above the input box for common development tasks. Customize these prompts for your project needs."
                   value={newAgent.systemPrompt}
                 />
               </div>
 
-              <div>
-                <label
-                  className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                >
-                  Available Tools
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    'Read',
-                    'Write',
-                    'Edit',
-                    'Bash',
-                    'Glob',
-                    'Grep',
-                    'Task',
-                    'WebFetch',
-                    'WebSearch',
-                    'TodoWrite',
-                  ].map(tool => (
-                    <button
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border-2 ${
-                        newAgent.tools.includes(tool)
-                          ? `${themeClasses.interactivePrimaryBg} ${themeClasses.interactivePrimaryText} ${themeClasses.borderFocus}`
-                          : `${themeClasses.bgSecondary} ${themeClasses.textSecondary} border-transparent ${themeClasses.borderHover}`
-                      }`}
-                      key={tool}
-                      onClick={() => {
-                        const updatedTools = newAgent.tools.includes(tool)
-                          ? newAgent.tools.filter(t => t !== tool)
-                          : [...newAgent.tools, tool]
-                        setNewAgent({ ...newAgent, tools: updatedTools })
-                      }}
-                    >
-                      {tool}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2 justify-end">
-                <button
-                  className={`px-4 py-2 rounded-lg text-sm font-medium ${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} hover:${themeClasses.bgInput} transition-colors`}
-                  onClick={handleCancelNewAgent}
-                >
-                  Cancel
-                </button>
-                <button
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    newAgent.name.trim() && newAgent.systemPrompt.trim()
-                      ? `${themeClasses.interactivePrimaryBg} hover:${themeClasses.interactivePrimaryBgHover} ${themeClasses.interactivePrimaryText}`
-                      : 'bg-gray-500 text-gray-300 cursor-not-allowed'
-                  }`}
-                  disabled={
-                    !newAgent.name.trim() || !newAgent.systemPrompt.trim()
-                  }
-                  onClick={handleSaveNewAgent}
-                >
-                  Create Agent
-                </button>
+              <div className={`text-xs ${themeClasses.textTertiary} mt-2`}>
+                Updated just now
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Existing Agents */}
-        {agents.map(agent => (
-          <div
-            className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-6`}
-            key={agent.id}
-          >
-            {editingAgentId === agent.id ? (
-              // Edit Mode
-              <div className="space-y-4">
-                <div>
-                  <label
-                    className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                  >
-                    Agent Name
-                  </label>
-                  <input
-                    className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus}`}
-                    onChange={e => {
-                      if (editingAgent) {
-                        setEditingAgent({
-                          ...editingAgent,
-                          name: e.target.value,
-                        })
-                      }
-                    }}
-                    placeholder="Agent name"
-                    type="text"
-                    value={editingAgent?.name || ''}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                  >
-                    System Prompt
-                  </label>
-                  <textarea
-                    className={`w-full ${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3 ${themeClasses.textPrimary} focus:outline-none ${themeClasses.borderFocus} min-h-[120px]`}
-                    onChange={e => {
-                      if (editingAgent) {
-                        setEditingAgent({
-                          ...editingAgent,
-                          systemPrompt: e.target.value,
-                        })
-                      }
-                    }}
-                    placeholder="System prompt for this agent"
-                    value={editingAgent?.systemPrompt || ''}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                  >
-                    Available Tools
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      'Read',
-                      'Write',
-                      'Edit',
-                      'Bash',
-                      'Glob',
-                      'Grep',
-                      'Task',
-                      'WebFetch',
-                      'WebSearch',
-                      'TodoWrite',
-                    ].map(tool => (
+          {/* Existing Agent Cards */}
+          {agents.map(agent => (
+            <div
+              className={`${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} rounded-lg p-4 flex flex-col h-[280px] hover:${themeClasses.borderHover} transition-colors cursor-pointer`}
+              key={agent.id}
+            >
+              {editingAgentId === agent.id ? (
+                // Edit Mode
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <input
+                      className={`flex-1 ${themeClasses.bgPrimary} border-none rounded px-2 py-1 ${themeClasses.textPrimary} focus:outline-none text-base font-semibold`}
+                      onChange={e => {
+                        if (editingAgent) {
+                          setEditingAgent({
+                            ...editingAgent,
+                            name: e.target.value,
+                          })
+                        }
+                      }}
+                      placeholder="Title"
+                      type="text"
+                      value={editingAgent?.name || ''}
+                    />
+                    <div className="flex items-center gap-2 ml-2">
                       <button
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border-2 ${
-                          editingAgent?.tools.includes(tool)
-                            ? `${themeClasses.interactivePrimaryBg} ${themeClasses.interactivePrimaryText} ${themeClasses.borderFocus}`
-                            : `${themeClasses.bgSecondary} ${themeClasses.textSecondary} border-transparent ${themeClasses.borderHover}`
+                        className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                          isLightTheme
+                            ? 'bg-black text-white hover:bg-gray-800'
+                            : 'bg-white text-black hover:bg-gray-200'
                         }`}
-                        key={tool}
-                        onClick={() => {
-                          if (editingAgent) {
-                            const newTools = editingAgent.tools.includes(tool)
-                              ? editingAgent.tools.filter(t => t !== tool)
-                              : [...editingAgent.tools, tool]
-                            setEditingAgent({
-                              ...editingAgent,
-                              tools: newTools,
-                            })
-                          }
-                        }}
+                        onClick={handleSaveEdit}
                       >
-                        {tool}
+                        Save
                       </button>
-                    ))}
+                      <button
+                        className={`p-1 rounded hover:${themeClasses.bgInput} transition-colors`}
+                        onClick={() => handleDeleteAgent(agent.id)}
+                      >
+                        <Trash2 className={`w-4 h-4 ${themeClasses.textSecondary}`} />
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex gap-2 justify-end">
-                  <button
-                    className={`px-4 py-2 rounded-lg text-sm font-medium ${themeClasses.bgSecondary} border ${themeClasses.borderPrimary} hover:${themeClasses.bgInput} transition-colors`}
-                    onClick={() => {
-                      setEditingAgentId(null)
-                      setEditingAgent(null)
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className={`px-4 py-2 rounded-lg text-sm font-medium ${themeClasses.interactivePrimaryBg} hover:${themeClasses.interactivePrimaryBgHover} ${themeClasses.interactivePrimaryText} transition-colors`}
-                    onClick={() => {
-                      if (editingAgent) {
-                        setAgents(
-                          agents.map(a =>
-                            a.id === editingAgent.id
-                              ? { ...editingAgent, updatedAt: new Date() }
-                              : a
-                          )
-                        )
-                        setEditingAgentId(null)
-                        setEditingAgent(null)
-                      }
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : (
-              // View Mode
-              <div className="space-y-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h4
-                      className={`text-xl font-bold ${themeClasses.textPrimary} mb-1`}
-                    >
+                  <div className="flex-1 overflow-hidden">
+                    <label className={`text-xs font-semibold ${themeClasses.textSecondary} mb-2 block`}>
+                      Prompt
+                    </label>
+                    <textarea
+                      className={`w-full h-[160px] ${themeClasses.bgPrimary} border-none rounded p-2 ${themeClasses.textPrimary} focus:outline-none text-sm resize-none`}
+                      onChange={e => {
+                        if (editingAgent) {
+                          setEditingAgent({
+                            ...editingAgent,
+                            systemPrompt: e.target.value,
+                          })
+                        }
+                      }}
+                      placeholder="System prompt for this agent"
+                      value={editingAgent?.systemPrompt || ''}
+                    />
+                  </div>
+
+                  <div className={`text-xs ${themeClasses.textTertiary} mt-2`}>
+                    Updated on {formatDate(agent.updatedAt)}
+                  </div>
+                </>
+              ) : (
+                // View Mode
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className={`text-base font-semibold ${themeClasses.textPrimary} truncate flex-1`}>
                       {agent.name}
-                    </h4>
-                    <p className={`text-xs ${themeClasses.textTertiary}`}>
-                      Last updated: {agent.updatedAt.toLocaleDateString()}
-                    </p>
+                    </h3>
+                    <button
+                      className={`p-1 rounded hover:${themeClasses.bgInput} transition-colors flex-shrink-0 ml-2`}
+                      onClick={() => handleStartEdit(agent)}
+                    >
+                      <Pencil className={`w-4 h-4 ${themeClasses.textSecondary}`} />
+                    </button>
                   </div>
-                  <button
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium ${themeClasses.interactivePrimaryBg} hover:${themeClasses.interactivePrimaryBgHover} ${themeClasses.interactivePrimaryText} transition-colors`}
-                    onClick={() => {
-                      setEditingAgentId(agent.id)
-                      setEditingAgent({ ...agent })
-                    }}
-                  >
-                    Edit
-                  </button>
-                </div>
 
-                <div>
-                  <label
-                    className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                  >
-                    System Prompt
-                  </label>
-                  <div
-                    className={`${themeClasses.bgInput} border ${themeClasses.borderPrimary} rounded-lg p-3`}
-                  >
-                    <p className={`text-sm ${themeClasses.textPrimary}`}>
+                  <div className="flex-1 overflow-hidden">
+                    <label className={`text-xs font-semibold ${themeClasses.textSecondary} mb-2 block`}>
+                      Prompt
+                    </label>
+                    <p className={`text-sm ${themeClasses.textPrimary} line-clamp-6`}>
                       {agent.systemPrompt}
                     </p>
                   </div>
-                </div>
 
-                <div>
-                  <label
-                    className={`text-sm font-medium ${themeClasses.textSecondary} mb-2 block`}
-                  >
-                    Available Tools
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {agent.tools.map(tool => (
-                      <span
-                        className="text-xs px-2 py-0.5 rounded"
-                        key={tool}
-                        style={{
-                          backgroundColor: theme.background.labels,
-                          color: theme.text.muted,
-                        }}
-                      >
-                        {tool}
-                      </span>
-                    ))}
+                  <div className={`text-xs ${themeClasses.textTertiary} mt-2`}>
+                    Updated on {formatDate(agent.updatedAt)}
                   </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

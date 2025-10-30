@@ -193,6 +193,7 @@ export function Prompts({ projectContext }: PromptsProps) {
   const [conversationViewMode, setConversationViewMode] = useState<
     'conversation' | 'diff'
   >('conversation')
+  const [triggerNewAgent, setTriggerNewAgent] = useState(false)
 
   // Context usage tracking - real calculation from conversation token data
   const getContextUsage = (): {
@@ -258,6 +259,37 @@ export function Prompts({ projectContext }: PromptsProps) {
       updatedAt: new Date(),
     },
   ])
+
+  // Load agents from file on mount
+  useEffect(() => {
+    const loadAgents = async () => {
+      try {
+        const loadedAgents = await window.App.getPromptAgents()
+        if (loadedAgents.length > 0) {
+          setAgents(loadedAgents)
+        }
+        // If no agents exist, keep the hardcoded defaults as initial seed
+      } catch (error) {
+        console.error('Error loading agents:', error)
+      }
+    }
+    loadAgents()
+  }, [])
+
+  // Save agents whenever they change
+  useEffect(() => {
+    const saveAgents = async () => {
+      try {
+        await window.App.savePromptAgents(agents)
+      } catch (error) {
+        console.error('Error saving agents:', error)
+      }
+    }
+    // Only save if agents array is not empty (avoid saving empty array on first render)
+    if (agents.length > 0) {
+      saveAgents()
+    }
+  }, [agents])
 
   // Load enhanced prompt history when project changes
   useEffect(() => {
@@ -522,7 +554,7 @@ export function Prompts({ projectContext }: PromptsProps) {
 
         {/* Context Widget */}
         <div
-          className={`mt-20 mb-4 ${isLightTheme ? 'bg-gray-100 border-gray-200' : themeClasses.bgSecondary + ' ' + themeClasses.borderPrimary} border rounded-lg p-3`}
+          className={`mt-20 mb-4 ${isLightTheme ? 'bg-gray-100 border-gray-200' : `${themeClasses.bgSecondary} ${themeClasses.borderPrimary}`} border rounded-lg p-3`}
         >
           {isLightTheme ? (
             <>
@@ -533,9 +565,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                   with Claude Code.
                 </span>
               </div>
-              <div className="text-[10px] text-gray-600 mb-2">
-                Tokens used
-              </div>
+              <div className="text-[10px] text-gray-600 mb-2">Tokens used</div>
               {/* Progress Bar */}
               <div className="flex items-center gap-1">
                 <span className="text-[9px] text-gray-600">0K</span>
@@ -607,20 +637,20 @@ export function Prompts({ projectContext }: PromptsProps) {
         {/* Existing Prompts */}
         <div className="space-y-3">
           {promptHistory.map(prompt => {
-            const isActive = selectedConversation.promptId === prompt.id && viewMode === 'prompts'
+            const isActive =
+              selectedConversation.promptId === prompt.id &&
+              viewMode === 'prompts'
 
             return (
               <button
                 className={`relative rounded-lg p-3 cursor-pointer border-2 w-full text-left transition-all duration-200 ${
                   isActive
                     ? themeClasses.bgInput + ' ' + themeClasses.borderFocus
-                    : themeClasses.bgSecondary + ' border-transparent hover:' + themeClasses.bgInput
+                    : themeClasses.bgSecondary +
+                      ' border-transparent hover:' +
+                      themeClasses.bgInput
                 }`}
                 key={prompt.id}
-                style={{
-                  borderLeftWidth: isActive ? '4px' : '2px',
-                  borderLeftColor: isActive ? theme.status.info : 'transparent',
-                }}
                 onClick={async () => {
                   console.log('Selected prompt:', prompt.id)
                   setViewMode('prompts')
@@ -641,50 +671,57 @@ export function Prompts({ projectContext }: PromptsProps) {
                     updatedAt: new Date(prompt.updatedAt),
                   })
                 }}
+                style={{
+                  borderLeftWidth: isActive ? '4px' : '2px',
+                  borderLeftColor: isActive ? theme.status.info : 'transparent',
+                }}
               >
-              <div className="flex items-start gap-2">
-                {/* Enhanced Status Indicator with conversation state overlay */}
-                <div className="relative flex-shrink-0 mt-1">
-                  {/* Base status dot from database */}
-                  <div
-                    className={`w-2 h-2 rounded-full ${getStatusColor(prompt.status)}`}
-                  />
-
-                  {/* Overlay active conversation state if running */}
-                  {busyConversations.get(prompt.id) && (
+                <div className="flex items-start gap-2">
+                  {/* Enhanced Status Indicator with conversation state overlay */}
+                  <div className="relative flex-shrink-0 mt-1">
+                    {/* Base status dot from database */}
                     <div
-                      className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 ${
-                        isLightTheme ? 'border-white' : 'border-gray-900'
-                      } ${getConversationStatusColor(busyConversations.get(prompt.id)!.status).bg} animate-pulse`}
-                      title={
-                        getConversationStatusColor(
-                          busyConversations.get(prompt.id)!.status
-                        ).label
-                      }
+                      className={`w-2 h-2 rounded-full ${getStatusColor(prompt.status)}`}
                     />
-                  )}
-                </div>
 
-                <div className="flex-1 min-w-0">
-                  {/* Prompt Text - Truncated to 60 chars */}
-                  <div
-                    className={`text-sm font-medium ${themeClasses.textPrimary} truncate`}
-                  >
-                    {prompt.prompt.length > 60
-                      ? `${prompt.prompt.substring(0, 60)}...`
-                      : prompt.prompt}
+                    {/* Overlay active conversation state if running */}
+                    {busyConversations.get(prompt.id) &&
+                      (() => {
+                        const busyConv = busyConversations.get(prompt.id)
+                        if (!busyConv) return null
+                        return (
+                          <div
+                            className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 ${
+                              isLightTheme ? 'border-white' : 'border-gray-900'
+                            } ${getConversationStatusColor(busyConv.status).bg} animate-pulse`}
+                            title={
+                              getConversationStatusColor(busyConv.status).label
+                            }
+                          />
+                        )
+                      })()}
                   </div>
 
-                  {/* Branch Name - Small Font */}
-                  <div
-                    className={`flex items-center gap-1 text-xs ${themeClasses.textTertiary} mt-1`}
-                  >
-                    <GitBranch className="w-3 h-3 flex-shrink-0" />
-                    <span className="truncate">{prompt.branch}</span>
+                  <div className="flex-1 min-w-0">
+                    {/* Prompt Text - Truncated to 60 chars */}
+                    <div
+                      className={`text-sm font-medium ${themeClasses.textPrimary} truncate`}
+                    >
+                      {prompt.prompt.length > 60
+                        ? `${prompt.prompt.substring(0, 60)}...`
+                        : prompt.prompt}
+                    </div>
+
+                    {/* Branch Name - Small Font */}
+                    <div
+                      className={`flex items-center gap-1 text-xs ${themeClasses.textTertiary} mt-1`}
+                    >
+                      <GitBranch className="w-3 h-3 flex-shrink-0" />
+                      <span className="truncate">{prompt.branch}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </button>
+              </button>
             )
           })}
         </div>
@@ -702,7 +739,7 @@ export function Prompts({ projectContext }: PromptsProps) {
               <h3
                 className={`text-lg font-semibold ${themeClasses.textPrimary}`}
               >
-                Prompt Agents
+                Hello?
               </h3>
             ) : viewMode === 'memory' ? (
               <h3
@@ -731,8 +768,23 @@ export function Prompts({ projectContext }: PromptsProps) {
             )}
           </div>
 
-          {/* Right side - Simple toolbar (only show for prompts view) */}
-          {viewMode === 'prompts' && (
+          {/* Right side - Simple toolbar */}
+          {viewMode === 'agents' ? (
+            <button
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isLightTheme
+                  ? 'bg-black text-white hover:bg-gray-800'
+                  : 'bg-white text-black hover:bg-gray-200'
+              }`}
+              onClick={() => {
+                setTriggerNewAgent(true)
+                setTimeout(() => setTriggerNewAgent(false), 100)
+              }}
+            >
+              <Plus className="w-4 h-4" />
+              New Agent
+            </button>
+          ) : viewMode === 'prompts' ? (
             <div className="flex items-center gap-[10px]">
               {/* Terminal and Keyboard group */}
               <div
@@ -831,12 +883,12 @@ export function Prompts({ projectContext }: PromptsProps) {
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Agent Management View */}
         {viewMode === 'agents' && (
-          <AgentView agents={agents} setAgents={setAgents} />
+          <AgentView agents={agents} setAgents={setAgents} triggerNewAgent={triggerNewAgent} />
         )}
 
         {/* Project Memory View */}
@@ -853,13 +905,7 @@ export function Prompts({ projectContext }: PromptsProps) {
             isPromptBusy={isPromptBusy}
             loadAndProcessPromptHistory={loadAndProcessPromptHistory}
             newConversation={newConversation}
-            projectContext={projectContext}
-            promptHistory={promptHistory}
-            selectedConversation={selectedConversation}
-            setBusyConversations={setBusyConversations}
-            setPromptHistory={setPromptHistory}
-            setSelectedConversation={setSelectedConversation}
-            onTokenUsageUpdate={(usage) => {
+            onTokenUsageUpdate={usage => {
               setConversationTokenUsage(prev => {
                 const newMap = new Map(prev)
                 newMap.set(selectedConversation.promptId, {
@@ -870,6 +916,12 @@ export function Prompts({ projectContext }: PromptsProps) {
                 return newMap
               })
             }}
+            projectContext={projectContext}
+            promptHistory={promptHistory}
+            selectedConversation={selectedConversation}
+            setBusyConversations={setBusyConversations}
+            setPromptHistory={setPromptHistory}
+            setSelectedConversation={setSelectedConversation}
           />
         )}
 

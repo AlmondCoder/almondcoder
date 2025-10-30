@@ -24,6 +24,10 @@ const API = {
   getAppDataPath: () => ipcRenderer.invoke('get-app-data-path'),
   addRecentProject: (project: { name: string; path: string }) =>
     ipcRenderer.invoke('add-recent-project', project),
+  // Prompt Agents methods
+  getPromptAgents: () => ipcRenderer.invoke('get-prompt-agents'),
+  savePromptAgents: (agents: any[]) =>
+    ipcRenderer.invoke('save-prompt-agents', agents),
   isGitRepository: (path: string) =>
     ipcRenderer.invoke('is-git-repository', path),
   getGitBranches: (path: string) =>
@@ -255,6 +259,31 @@ const API = {
       ipcRenderer.removeListener('conversation-state-changed', handler)
     }
   },
+
+  // ============================================================================
+  // Authentication IPC Methods
+  // ============================================================================
+  // LOGIC: Check if Claude Agent SDK is authenticated and provide login flow
+
+  /**
+   * Check if Claude Agent SDK is authenticated
+   * Returns { authenticated: boolean, error?: string }
+   */
+  checkClaudeAuthentication: () =>
+    ipcRenderer.invoke('check-claude-authentication'),
+
+  /**
+   * Get the login URL for Claude authentication
+   * Returns { url?: string, error?: string }
+   */
+  getClaudeLoginUrl: () => ipcRenderer.invoke('get-claude-login-url'),
+
+  /**
+   * Open an external URL in the default browser
+   * Returns { success?: boolean, error?: string }
+   */
+  openExternalUrl: (url: string) =>
+    ipcRenderer.invoke('open-external-url', url),
 }
 
 contextBridge.exposeInMainWorld('App', API)
