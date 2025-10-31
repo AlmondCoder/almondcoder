@@ -2103,6 +2103,10 @@ ipcMain.handle('check-claude-authentication', async () => {
   try {
     console.log('🔐 [Auth Check] Testing Claude SDK authentication...')
 
+    // Get active provider if configured
+    const { getActiveProvider } = await import('./credential-manager')
+    const activeProvider = await getActiveProvider()
+
     // Import query function from SDK
     const { query } = await import('@anthropic-ai/claude-agent-sdk')
 
@@ -2122,29 +2126,58 @@ ipcMain.handle('check-claude-authentication', async () => {
 
     if (firstMessage.done === false) {
       console.log('✅ [Auth Check] Claude SDK is authenticated')
-      return { authenticated: true }
+      return {
+        authenticated: true,
+        currentProvider: activeProvider
+      }
     }
 
     // If done immediately, something went wrong
     console.log('❌ [Auth Check] Test query completed without messages')
     return {
       authenticated: false,
-      error: 'SDK returned no messages'
+      error: 'SDK returned no messages',
+      errorType: 'unknown',
+      currentProvider: activeProvider
     }
   } catch (error: any) {
     console.error('❌ [Auth Check] Authentication check failed:', error)
 
     // Check for specific authentication errors
     const errorMessage = error?.message || String(error)
-    const isAuthError =
+
+    let errorType: 'auth' | 'model' | 'network' | 'unknown' = 'unknown'
+    let suggestedProvider: 'bedrock' | 'vertex' | undefined
+
+    // Detect error type and suggest provider
+    if (errorMessage.includes('model identifier') || errorMessage.includes('invalid model')) {
+      errorType = 'model'
+      suggestedProvider = 'bedrock'
+    } else if (
       errorMessage.includes('authentication') ||
       errorMessage.includes('API key') ||
       errorMessage.includes('unauthorized') ||
       errorMessage.includes('401')
+    ) {
+      errorType = 'auth'
+    } else if (
+      errorMessage.includes('network') ||
+      errorMessage.includes('timeout') ||
+      errorMessage.includes('ECONNREFUSED')
+    ) {
+      errorType = 'network'
+    }
+
+    // Get active provider
+    const { getActiveProvider } = await import('./credential-manager')
+    const activeProvider = await getActiveProvider()
 
     return {
       authenticated: false,
-      error: isAuthError ? 'Not authenticated' : errorMessage
+      error: errorMessage,
+      errorType,
+      suggestedProvider,
+      currentProvider: activeProvider
     }
   }
 })
@@ -2167,6 +2200,161 @@ ipcMain.handle('get-claude-login-url', async () => {
   } catch (error: any) {
     console.error('❌ [Auth] Failed to get login URL:', error)
     return { error: error?.message || String(error) }
+  }
+})
+
+// ============================================================================
+// Provider Configuration IPC Handlers
+// ============================================================================
+
+/**
+ * Get the currently active authentication provider
+ */
+ipcMain.handle('get-active-provider', async () => {
+  try {
+    const { getActiveProvider } = await import('./credential-manager')
+    const provider = await getActiveProvider()
+    return { provider }
+  } catch (error: any) {
+    console.error('❌ [Provider] Failed to get active provider:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Set the active authentication provider
+ */
+ipcMain.handle('set-active-provider', async (event, provider: string) => {
+  try {
+    const { setActiveProvider } = await import('./credential-manager')
+    await setActiveProvider(provider as any)
+    console.log('✅ [Provider] Active provider set to:', provider)
+    return { success: true }
+  } catch (error: any) {
+    console.error('❌ [Provider] Failed to set active provider:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Get credentials for a specific provider
+ */
+ipcMain.handle('get-provider-credentials', async (event, provider: string) => {
+  try {
+    const { getCredentials } = await import('./credential-manager')
+    const credentials = await getCredentials(provider as any)
+    return { credentials }
+  } catch (error: any) {
+    console.error('❌ [Provider] Failed to get credentials:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Save credentials for a specific provider
+ */
+ipcMain.handle('save-provider-credentials', async (event, provider: string, credentials: any) => {
+  try {
+    const { saveCredentials, setActiveProvider } = await import('./credential-manager')
+    await saveCredentials(provider as any, credentials)
+    // Also set this as the active provider
+    await setActiveProvider(provider as any)
+    console.log('✅ [Provider] Credentials saved for:', provider)
+    return { success: true }
+  } catch (error: any) {
+    console.error('❌ [Provider] Failed to save credentials:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Delete credentials for a specific provider
+ */
+ipcMain.handle('delete-provider-credentials', async (event, provider: string) => {
+  try {
+    const { deleteCredentials } = await import('./credential-manager')
+    await deleteCredentials(provider as any)
+    console.log('✅ [Provider] Credentials deleted for:', provider)
+    return { success: true }
+  } catch (error: any) {
+    console.error('❌ [Provider] Failed to delete credentials:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Detect existing environment variables for a provider
+ */
+ipcMain.handle('detect-existing-env-vars', async (event, provider: string) => {
+  try {
+    const { detectExistingEnvVars } = await import('./credential-manager')
+    const envVars = detectExistingEnvVars(provider as any)
+    return { envVars }
+  } catch (error: any) {
+    console.error('❌ [Provider] Failed to detect env vars:', error)
+    return { error: error?.message || String(error) }
+  }
+})
+
+/**
+ * Test provider connection with given credentials
+ */
+ipcMain.handle('test-provider-connection', async (event, provider: string, credentials: any) => {
+  try {
+    console.log('🔍 [Provider] Testing connection for:', provider)
+
+    // Temporarily set environment variables based on provider
+    const originalEnv = { ...process.env }
+
+    // Clear any existing provider env vars first
+    delete process.env.CLAUDE_CODE_USE_BEDROCK
+    delete process.env.CLAUDE_CODE_USE_VERTEX
+
+    // Set provider-specific env vars
+    if (provider === 'bedrock') {
+      process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+      process.env.AWS_ACCESS_KEY_ID = credentials.accessKeyId
+      process.env.AWS_SECRET_ACCESS_KEY = credentials.secretAccessKey
+      if (credentials.sessionToken) process.env.AWS_SESSION_TOKEN = credentials.sessionToken
+      if (credentials.region) process.env.AWS_REGION = credentials.region
+      if (credentials.model) process.env.ANTHROPIC_MODEL = credentials.model
+    } else if (provider === 'vertex') {
+      process.env.CLAUDE_CODE_USE_VERTEX = '1'
+      process.env.CLOUD_ML_REGION = credentials.region || 'global'
+      process.env.ANTHROPIC_VERTEX_PROJECT_ID = credentials.projectId
+      if (credentials.model) process.env.ANTHROPIC_MODEL = credentials.model
+      if (credentials.smallFastModel) process.env.ANTHROPIC_SMALL_FAST_MODEL = credentials.smallFastModel
+      if (credentials.disablePromptCaching) process.env.DISABLE_PROMPT_CACHING = '1'
+    } else if (provider === 'anthropic') {
+      if (credentials.apiKey) process.env.ANTHROPIC_API_KEY = credentials.apiKey
+    }
+
+    // Test connection with a minimal query
+    const { query } = await import('@anthropic-ai/claude-agent-sdk')
+    const testQuery = query({
+      prompt: 'hi',
+      options: {
+        cwd: '/tmp',
+        allowedTools: [],
+        permissionMode: 'bypassPermissions',
+      },
+    })
+
+    const firstMessage = await testQuery.next()
+
+    // Restore original environment
+    process.env = originalEnv
+
+    if (firstMessage.done === false) {
+      console.log('✅ [Provider] Connection test successful')
+      return { success: true }
+    }
+
+    console.log('❌ [Provider] Connection test failed - no response')
+    return { success: false, error: 'No response from provider' }
+  } catch (error: any) {
+    console.error('❌ [Provider] Connection test failed:', error)
+    return { success: false, error: error?.message || String(error) }
   }
 })
 

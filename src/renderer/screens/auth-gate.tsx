@@ -2,6 +2,8 @@ import { AlertCircle, ExternalLink, RefreshCw } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
+import { ProviderTabs } from '../components/auth/ProviderTabs'
+import type { AuthProvider } from '../../shared/types'
 
 const { App } = window
 
@@ -12,6 +14,9 @@ export function AuthGateScreen() {
 
   const [isChecking, setIsChecking] = useState(true)
   const [checkError, setCheckError] = useState<string | null>(null)
+  const [errorType, setErrorType] = useState<'auth' | 'model' | 'network' | 'unknown'>('unknown')
+  const [suggestedProvider, setSuggestedProvider] = useState<AuthProvider | undefined>()
+  const [showProviderConfig, setShowProviderConfig] = useState(false)
   const [loginUrl, setLoginUrl] = useState<string | null>(null)
   const [isLoadingUrl, setIsLoadingUrl] = useState(false)
 
@@ -31,15 +36,28 @@ export function AuthGateScreen() {
         // User is authenticated, navigate to main screen
         navigate('/')
       } else {
-        // Not authenticated, show login screen
+        // Not authenticated, show login screen with error details
         setCheckError(result.error || 'Not authenticated')
+        setErrorType(result.errorType || 'unknown')
+        setSuggestedProvider(result.suggestedProvider)
+
+        // Auto-show provider config if we have a suggestion
+        if (result.suggestedProvider) {
+          setShowProviderConfig(true)
+        }
       }
     } catch (error) {
       console.error('Failed to check authentication:', error)
       setCheckError('Failed to check authentication status')
+      setErrorType('unknown')
     } finally {
       setIsChecking(false)
     }
+  }
+
+  const handleProviderConfigSuccess = () => {
+    // After successful provider configuration, check auth again
+    checkAuthentication()
   }
 
   const handleLoginClick = async () => {
@@ -137,22 +155,20 @@ export function AuthGateScreen() {
 
           {/* Call to Action */}
           <div className="space-y-4">
+            {/* Show provider suggestion if detected */}
+            {errorType === 'model' && suggestedProvider && (
+              <div className={`p-4 ${themeClasses.bgTertiary} rounded-lg border-2 border-yellow-500`}>
+                <p className={`text-sm ${themeClasses.textSecondary} mb-2`}>
+                  <strong>Suggestion:</strong> This looks like an AWS Bedrock configuration issue. Try configuring AWS Bedrock below.
+                </p>
+              </div>
+            )}
+
             <button
               className={`w-full ${themeClasses.bgAccent} text-white font-semibold py-4 px-6 rounded-lg hover:opacity-90 transition-all duration-200 flex items-center justify-center gap-3 group`}
-              disabled={isLoadingUrl}
-              onClick={handleLoginClick}
+              onClick={() => setShowProviderConfig(!showProviderConfig)}
             >
-              {isLoadingUrl ? (
-                <>
-                  <RefreshCw className="w-5 h-5 animate-spin" />
-                  <span>Opening login page...</span>
-                </>
-              ) : (
-                <>
-                  <span>Login to Continue</span>
-                  <ExternalLink className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </>
-              )}
+              <span>{showProviderConfig ? 'Hide Configuration' : 'Configure Authentication'}</span>
             </button>
 
             {loginUrl && (
@@ -173,6 +189,21 @@ export function AuthGateScreen() {
             )}
           </div>
         </div>
+
+        {/* Provider Configuration */}
+        {showProviderConfig && (
+          <div
+            className={`max-w-4xl w-full ${themeClasses.bgSecondary} ${themeClasses.borderPrimary} border-2 rounded-xl p-8 mb-6`}
+          >
+            <h2 className={`text-2xl font-semibold ${themeClasses.textPrimary} mb-6`}>
+              Choose Authentication Provider
+            </h2>
+            <ProviderTabs
+              suggestedProvider={suggestedProvider}
+              onSuccess={handleProviderConfigSuccess}
+            />
+          </div>
+        )}
 
         {/* Info Box */}
         <div

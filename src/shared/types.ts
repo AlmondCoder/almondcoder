@@ -176,3 +176,43 @@ export interface TodoItem {
 export interface TodoList {
   todos: TodoItem[]
 }
+
+// ============================================================================
+// Authentication Provider Types
+// ============================================================================
+// These types support multi-provider authentication (Anthropic, AWS Bedrock, Google Vertex)
+
+export type AuthProvider = 'anthropic' | 'bedrock' | 'vertex'
+
+export interface AnthropicCredentials {
+  apiKey: string
+}
+
+export interface BedrockCredentials {
+  accessKeyId: string
+  secretAccessKey: string
+  sessionToken?: string
+  region?: string
+  model?: string
+}
+
+export interface VertexCredentials {
+  projectId: string
+  region: string
+  model?: string
+  smallFastModel?: string
+  disablePromptCaching?: boolean
+}
+
+export type ProviderCredentials =
+  | AnthropicCredentials
+  | BedrockCredentials
+  | VertexCredentials
+
+export interface AuthenticationCheckResult {
+  authenticated: boolean
+  error?: string
+  errorType?: 'auth' | 'model' | 'network' | 'unknown'
+  suggestedProvider?: AuthProvider
+  currentProvider?: AuthProvider
+}

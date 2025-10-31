@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Palette, Type, Monitor } from 'lucide-react'
+import { Palette, Type, Monitor, Key } from 'lucide-react'
 import {
   useTheme,
   createThemeClasses,
@@ -7,8 +7,9 @@ import {
   type FontFamily,
 } from '../../theme/ThemeContext'
 import type { ThemeName } from '../../theme/colors'
+import { ProviderTabs } from '../auth/ProviderTabs'
 
-type SettingsSection = 'theme' | 'appearance' | 'general'
+type SettingsSection = 'theme' | 'appearance' | 'general' | 'authentication'
 
 const themeDisplayNames: Record<ThemeName, string> = {
   dark: 'Dark',
@@ -49,6 +50,7 @@ export function Settings() {
   const sidebarItems = [
     { id: 'theme' as const, label: 'Theme', icon: Palette },
     { id: 'appearance' as const, label: 'Appearance', icon: Type },
+    { id: 'authentication' as const, label: 'Authentication', icon: Key },
     { id: 'general' as const, label: 'General', icon: Monitor },
   ]
 
@@ -187,6 +189,22 @@ export function Settings() {
     </div>
   )
 
+  const renderAuthenticationSection = () => (
+    <div className="space-y-6">
+      <div>
+        <h3
+          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
+        >
+          Authentication Provider
+        </h3>
+        <p className={`${themeClasses.textSecondary} mb-6`}>
+          Configure your authentication provider to connect to Claude AI. Choose between Anthropic Direct API, AWS Bedrock, or Google Vertex AI.
+        </p>
+        <ProviderTabs />
+      </div>
+    </div>
+  )
+
   const renderGeneralSection = () => (
     <div className="space-y-6">
       <div>
@@ -212,6 +230,8 @@ export function Settings() {
         return renderThemeSection()
       case 'appearance':
         return renderAppearanceSection()
+      case 'authentication':
+        return renderAuthenticationSection()
       case 'general':
         return renderGeneralSection()
       default:

@@ -267,7 +267,7 @@ const API = {
 
   /**
    * Check if Claude Agent SDK is authenticated
-   * Returns { authenticated: boolean, error?: string }
+   * Returns { authenticated: boolean, error?: string, errorType?, suggestedProvider?, currentProvider? }
    */
   checkClaudeAuthentication: () =>
     ipcRenderer.invoke('check-claude-authentication'),
@@ -284,6 +284,59 @@ const API = {
    */
   openExternalUrl: (url: string) =>
     ipcRenderer.invoke('open-external-url', url),
+
+  // ============================================================================
+  // Provider Configuration IPC Methods
+  // ============================================================================
+  // LOGIC: Manage authentication provider configuration (Anthropic, AWS Bedrock, Google Vertex)
+
+  /**
+   * Get the currently active authentication provider
+   * Returns { provider?: 'anthropic' | 'bedrock' | 'vertex', error?: string }
+   */
+  getActiveProvider: () => ipcRenderer.invoke('get-active-provider'),
+
+  /**
+   * Set the active authentication provider
+   * Returns { success: boolean, error?: string }
+   */
+  setActiveProvider: (provider: string) =>
+    ipcRenderer.invoke('set-active-provider', provider),
+
+  /**
+   * Get credentials for a specific provider
+   * Returns { credentials?: object, error?: string }
+   */
+  getProviderCredentials: (provider: string) =>
+    ipcRenderer.invoke('get-provider-credentials', provider),
+
+  /**
+   * Save credentials for a specific provider
+   * Returns { success: boolean, error?: string }
+   */
+  saveProviderCredentials: (provider: string, credentials: any) =>
+    ipcRenderer.invoke('save-provider-credentials', provider, credentials),
+
+  /**
+   * Delete credentials for a specific provider
+   * Returns { success: boolean, error?: string }
+   */
+  deleteProviderCredentials: (provider: string) =>
+    ipcRenderer.invoke('delete-provider-credentials', provider),
+
+  /**
+   * Detect existing environment variables for a provider
+   * Returns { envVars: object, error?: string }
+   */
+  detectExistingEnvVars: (provider: string) =>
+    ipcRenderer.invoke('detect-existing-env-vars', provider),
+
+  /**
+   * Test provider connection with given credentials
+   * Returns { success: boolean, error?: string }
+   */
+  testProviderConnection: (provider: string, credentials: any) =>
+    ipcRenderer.invoke('test-provider-connection', provider, credentials),
 }
 
 contextBridge.exposeInMainWorld('App', API)

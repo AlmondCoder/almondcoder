@@ -185,6 +185,51 @@ export async function executeClaudeQuery(
   })
 
   // ============================================================================
+  // Set Provider Environment Variables
+  // ============================================================================
+  // LOGIC: Load active provider and credentials, then set environment variables
+  // so the Claude SDK uses the correct authentication provider
+  try {
+    const { getActiveProvider, getCredentials } = await import('./credential-manager')
+    const activeProvider = await getActiveProvider()
+
+    if (activeProvider) {
+      console.log(`🔑 [Provider] Setting environment for: ${activeProvider}`)
+      const credentials = await getCredentials(activeProvider)
+
+      // Clear any existing provider env vars first
+      delete process.env.CLAUDE_CODE_USE_BEDROCK
+      delete process.env.CLAUDE_CODE_USE_VERTEX
+
+      if (credentials) {
+        if (activeProvider === 'bedrock') {
+          const bedrockCreds = credentials as any
+          process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+          process.env.AWS_ACCESS_KEY_ID = bedrockCreds.accessKeyId
+          process.env.AWS_SECRET_ACCESS_KEY = bedrockCreds.secretAccessKey
+          if (bedrockCreds.sessionToken) process.env.AWS_SESSION_TOKEN = bedrockCreds.sessionToken
+          if (bedrockCreds.region) process.env.AWS_REGION = bedrockCreds.region
+          if (bedrockCreds.model) process.env.ANTHROPIC_MODEL = bedrockCreds.model
+        } else if (activeProvider === 'vertex') {
+          const vertexCreds = credentials as any
+          process.env.CLAUDE_CODE_USE_VERTEX = '1'
+          process.env.CLOUD_ML_REGION = vertexCreds.region || 'global'
+          process.env.ANTHROPIC_VERTEX_PROJECT_ID = vertexCreds.projectId
+          if (vertexCreds.model) process.env.ANTHROPIC_MODEL = vertexCreds.model
+          if (vertexCreds.smallFastModel) process.env.ANTHROPIC_SMALL_FAST_MODEL = vertexCreds.smallFastModel
+          if (vertexCreds.disablePromptCaching) process.env.DISABLE_PROMPT_CACHING = '1'
+        } else if (activeProvider === 'anthropic') {
+          const anthropicCreds = credentials as any
+          if (anthropicCreds.apiKey) process.env.ANTHROPIC_API_KEY = anthropicCreds.apiKey
+        }
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ [Provider] Failed to load credentials:', error)
+    // Continue anyway - might be using CLI authentication
+  }
+
+  // ============================================================================
   // Initialize Auto-Accept Cache
   // ============================================================================
   // LOGIC: Store the initial auto-accept value in cache. This allows the value
@@ -369,8 +414,6 @@ export async function executeClaudeQuery(
         canUseTool, // ✨ ADD OUR CUSTOM PERMISSION CALLBACK
         resume, // Session resumption
         includePartialMessages: false, // CRITICAL: Enable streaming of partial messages
-        model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', // Override to fix bug
-
         // CRITICAL: Load project settings to respect working directory and CLAUDE.md
         settingSources: ['project'],
 
