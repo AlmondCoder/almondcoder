@@ -14,8 +14,12 @@ export function AuthGateScreen() {
 
   const [isChecking, setIsChecking] = useState(true)
   const [checkError, setCheckError] = useState<string | null>(null)
-  const [errorType, setErrorType] = useState<'auth' | 'model' | 'network' | 'unknown'>('unknown')
-  const [suggestedProvider, setSuggestedProvider] = useState<AuthProvider | undefined>()
+  const [errorType, setErrorType] = useState<
+    'auth' | 'model' | 'network' | 'unknown'
+  >('unknown')
+  const [suggestedProvider, setSuggestedProvider] = useState<
+    AuthProvider | undefined
+  >()
   const [showProviderConfig, setShowProviderConfig] = useState(false)
   const [loginUrl, setLoginUrl] = useState<string | null>(null)
   const [isLoadingUrl, setIsLoadingUrl] = useState(false)
@@ -110,11 +114,7 @@ export function AuthGateScreen() {
         {/* Header */}
         <div className="text-center mb-12">
           <div className="flex justify-center mb-6">
-            <img
-              alt="Almond Coder"
-              className="w-24 h-24"
-              src="/logo.svg"
-            />
+            <img alt="Almond Coder" className="w-24 h-24" src="/logo.svg" />
           </div>
           <h1
             className={`text-5xl font-light ${themeClasses.textPrimary} mb-4`}
@@ -130,99 +130,19 @@ export function AuthGateScreen() {
         <div
           className={`max-w-2xl w-full ${themeClasses.bgSecondary} ${themeClasses.borderPrimary} border-2 rounded-xl p-8 mb-6`}
         >
+          <h2
+            className={`text-2xl font-semibold ${themeClasses.textPrimary} mb-6`}
+          >
+            Choose Authentication Provider
+          </h2>
           <div className="flex items-start mb-6">
-            <AlertCircle
-              className={`w-8 h-8 ${themeClasses.textAccent} mr-4 flex-shrink-0 mt-1`}
+            <ProviderTabs
+              onSuccess={handleProviderConfigSuccess}
+              suggestedProvider={suggestedProvider}
             />
-            <div>
-              <h2
-                className={`text-2xl font-semibold ${themeClasses.textPrimary} mb-2`}
-              >
-                Authentication Required
-              </h2>
-              <p className={`text-base ${themeClasses.textSecondary} mb-4`}>
-                To use Almond Coder, you need to authenticate with Claude. This
-                enables access to Claude Sonnet for AI-powered coding
-                assistance.
-              </p>
-              {checkError && (
-                <p className={`text-sm ${themeClasses.textMuted} mb-4`}>
-                  Error: {checkError}
-                </p>
-              )}
-            </div>
           </div>
 
           {/* Call to Action */}
-          <div className="space-y-4">
-            {/* Show provider suggestion if detected */}
-            {errorType === 'model' && suggestedProvider && (
-              <div className={`p-4 ${themeClasses.bgTertiary} rounded-lg border-2 border-yellow-500`}>
-                <p className={`text-sm ${themeClasses.textSecondary} mb-2`}>
-                  <strong>Suggestion:</strong> This looks like an AWS Bedrock configuration issue. Try configuring AWS Bedrock below.
-                </p>
-              </div>
-            )}
-
-            <button
-              className={`w-full ${themeClasses.bgAccent} text-white font-semibold py-4 px-6 rounded-lg hover:opacity-90 transition-all duration-200 flex items-center justify-center gap-3 group`}
-              onClick={() => setShowProviderConfig(!showProviderConfig)}
-            >
-              <span>{showProviderConfig ? 'Hide Configuration' : 'Configure Authentication'}</span>
-            </button>
-
-            {loginUrl && (
-              <div
-                className={`text-center p-4 ${themeClasses.bgTertiary} rounded-lg`}
-              >
-                <p className={`text-sm ${themeClasses.textSecondary} mb-2`}>
-                  Return here after logging in and click:
-                </p>
-                <button
-                  className={`${themeClasses.bgSecondary} ${themeClasses.borderPrimary} border-2 ${themeClasses.textPrimary} font-medium py-2 px-6 rounded-lg hover:${themeClasses.borderFocus} transition-all duration-200 flex items-center justify-center gap-2 mx-auto`}
-                  onClick={checkAuthentication}
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span>Check Again</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Provider Configuration */}
-        {showProviderConfig && (
-          <div
-            className={`max-w-4xl w-full ${themeClasses.bgSecondary} ${themeClasses.borderPrimary} border-2 rounded-xl p-8 mb-6`}
-          >
-            <h2 className={`text-2xl font-semibold ${themeClasses.textPrimary} mb-6`}>
-              Choose Authentication Provider
-            </h2>
-            <ProviderTabs
-              suggestedProvider={suggestedProvider}
-              onSuccess={handleProviderConfigSuccess}
-            />
-          </div>
-        )}
-
-        {/* Info Box */}
-        <div
-          className={`max-w-2xl w-full ${themeClasses.bgTertiary} rounded-lg p-6`}
-        >
-          <h3 className={`text-lg font-semibold ${themeClasses.textPrimary} mb-3`}>
-            New to Claude?
-          </h3>
-          <p className={`text-base ${themeClasses.textSecondary} mb-4`}>
-            Start your free trial and get access to Claude Sonnet with $1
-            million tokens per month. Perfect for building, debugging, and
-            understanding your codebase.
-          </p>
-          <ul className={`text-sm ${themeClasses.textMuted} space-y-2`}>
-            <li>✓ Advanced code understanding and generation</li>
-            <li>✓ Git integration with branch management</li>
-            <li>✓ Parallel conversation support</li>
-            <li>✓ Visual architecture planning</li>
-          </ul>
         </div>
       </div>
     </div>

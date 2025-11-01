@@ -469,35 +469,6 @@ ipcMain.handle('add-recent-project', (event, project) => {
   return limitedProjects
 })
 
-// Project Memory IPC handlers - Reads/writes CLAUDE.md in project root
-ipcMain.handle('read-project-memory', async (event, projectPath: string) => {
-  try {
-    const claudeMdPath = join(projectPath, 'CLAUDE.md')
-
-    if (existsSync(claudeMdPath)) {
-      return readFileSync(claudeMdPath, 'utf-8')
-    }
-    return ''
-  } catch (error) {
-    console.error('Error reading CLAUDE.md:', error)
-    throw error
-  }
-})
-
-ipcMain.handle(
-  'save-project-memory',
-  async (event, projectPath: string, content: string) => {
-    try {
-      const claudeMdPath = join(projectPath, 'CLAUDE.md')
-      writeFileSync(claudeMdPath, content, 'utf-8')
-      return true
-    } catch (error) {
-      console.error('Error saving CLAUDE.md:', error)
-      throw error
-    }
-  }
-)
-
 // Settings IPC handlers - General settings management
 ipcMain.handle('get-project-settings', async (event, projectPath: string) => {
   try {
@@ -703,6 +674,12 @@ ipcMain.handle('get-git-branches', async (event, path) => {
 
 ipcMain.handle('get-git-diff', async (event, path) => {
   try {
+    // Add intent-to-add for untracked files so they appear in diff
+    // This makes git aware of new files without actually staging them
+    await execAsync('git add -N .', { cwd: path }).catch(() => {
+      // Ignore errors (e.g., if no untracked files exist)
+    })
+
     // Get the diff between HEAD and working directory
     const { stdout } = await execAsync('git diff HEAD', { cwd: path })
 

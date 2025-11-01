@@ -63,11 +63,6 @@ const API = {
     ipcRenderer.invoke('append-to-conversation-log', filePath, logEntry),
   getCurrentBranchStatus: (projectPath: string, branchName: string) =>
     ipcRenderer.invoke('get-current-branch-status', projectPath, branchName),
-  // Project Memory methods - Read/write CLAUDE.md
-  readProjectMemory: (projectPath: string) =>
-    ipcRenderer.invoke('read-project-memory', projectPath),
-  saveProjectMemory: (projectPath: string, content: string) =>
-    ipcRenderer.invoke('save-project-memory', projectPath, content),
   // Project Settings methods - General settings management
   getProjectSettings: (projectPath: string) =>
     ipcRenderer.invoke('get-project-settings', projectPath),

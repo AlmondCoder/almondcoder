@@ -414,10 +414,6 @@ export async function executeClaudeQuery(
         canUseTool, // ✨ ADD OUR CUSTOM PERMISSION CALLBACK
         resume, // Session resumption
         includePartialMessages: false, // CRITICAL: Enable streaming of partial messages
-        // CRITICAL: Load project settings to respect working directory and CLAUDE.md
-        settingSources: ['project'],
-
-        // CRITICAL: Use Claude Code system prompt to support CLAUDE.md files
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',

@@ -5,7 +5,6 @@ import {
   GitBranch,
   Plus,
   Grid3x3,
-  Brain,
   Info,
   Terminal,
   Keyboard,
@@ -14,7 +13,6 @@ import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import { AgentView } from './AgentView'
 import { ConversationView } from './ConversationView'
 import { DiffView } from './DiffView'
-import { ProjectMemory } from './ProjectMemory'
 
 import type {
   EnhancedPromptHistoryItem,
@@ -187,9 +185,7 @@ export function Prompts({ projectContext }: PromptsProps) {
   }
 
   // Agent management state
-  const [viewMode, setViewMode] = useState<'prompts' | 'agents' | 'memory'>(
-    'prompts'
-  )
+  const [viewMode, setViewMode] = useState<'prompts' | 'agents'>('prompts')
   const [conversationViewMode, setConversationViewMode] = useState<
     'conversation' | 'diff'
   >('conversation')
@@ -515,38 +511,6 @@ export function Prompts({ projectContext }: PromptsProps) {
                 className={`text-sm font-medium ${viewMode === 'agents' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
               >
                 Prompt Agents
-              </span>
-            </div>
-          </button>
-
-          {/* Project Memory Button */}
-          <button
-            className={`${
-              isLightTheme
-                ? viewMode === 'memory'
-                  ? 'bg-white border-gray-300'
-                  : 'bg-gray-50 border-transparent hover:bg-white hover:border-gray-300'
-                : viewMode === 'memory'
-                  ? themeClasses.bgInput +
-                    ' border-2 ' +
-                    themeClasses.borderFocus
-                  : themeClasses.bgSecondary +
-                    ' border-2 border-transparent hover:' +
-                    themeClasses.bgInput
-            } rounded-lg p-3 cursor-pointer border transition-all w-full text-left`}
-            onClick={() => {
-              console.log('Clicked Project Memory')
-              setViewMode('memory')
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <Brain
-                className={`w-4 h-4 flex-shrink-0 ${viewMode === 'memory' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
-              />
-              <span
-                className={`text-sm font-medium ${viewMode === 'memory' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
-              >
-                Project Memory
               </span>
             </div>
           </button>
@@ -889,11 +853,6 @@ export function Prompts({ projectContext }: PromptsProps) {
         {/* Agent Management View */}
         {viewMode === 'agents' && (
           <AgentView agents={agents} setAgents={setAgents} triggerNewAgent={triggerNewAgent} />
-        )}
-
-        {/* Project Memory View */}
-        {viewMode === 'memory' && (
-          <ProjectMemory projectPath={projectContext?.projectPath || ''} />
         )}
 
         {/* Prompt View - Only show when not in agents mode */}
