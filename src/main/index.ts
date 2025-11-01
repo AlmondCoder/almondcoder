@@ -650,7 +650,15 @@ ipcMain.handle('is-git-repository', async (event, path) => {
     })
     return stdout.trim() === 'true'
   } catch (error) {
-    return false
+    try {
+      await execAsync('git init', { cwd: path })
+      // Create an initial empty commit to avoid empty repo issues
+      await execAsync('git commit -m "Initial commit"', { cwd: path })
+      return true
+    } catch (initError) {
+      console.error('Failed to initialize git repository:', initError)
+      return false
+    }
   }
 })
 
@@ -1359,7 +1367,10 @@ ipcMain.handle(
       })
 
       // Step 1: Get worktree information from git directly
-      const worktreeInfo = await getWorktreeInfoFromGit(projectPath, sourceBranch)
+      const worktreeInfo = await getWorktreeInfoFromGit(
+        projectPath,
+        sourceBranch
+      )
 
       if (!worktreeInfo) {
         throw new Error(`Worktree for branch ${sourceBranch} not found`)
@@ -1391,15 +1402,20 @@ ipcMain.handle(
           }
         }
       } catch (error) {
-        console.warn('Could not load prompt text from history, using branch name')
+        console.warn(
+          'Could not load prompt text from history, using branch name'
+        )
       }
 
       console.log('Found worktree:', { worktreePath, promptText })
 
       // Step 2: Check for uncommitted changes in worktree
-      const { stdout: statusOutput } = await execAsync('git status --porcelain', {
-        cwd: worktreePath,
-      })
+      const { stdout: statusOutput } = await execAsync(
+        'git status --porcelain',
+        {
+          cwd: worktreePath,
+        }
+      )
 
       // Step 3: Auto-commit if there are uncommitted changes
       if (statusOutput.trim()) {
@@ -1459,9 +1475,12 @@ ipcMain.handle(
             console.log('Merge conflicts detected, parsing conflicts...')
 
             // Get list of conflicted files
-            const { stdout: statusOutput } = await execAsync('git status --porcelain', {
-              cwd: projectPath,
-            })
+            const { stdout: statusOutput } = await execAsync(
+              'git status --porcelain',
+              {
+                cwd: projectPath,
+              }
+            )
 
             const conflictedFiles = statusOutput
               .split('\n')
@@ -1593,7 +1612,10 @@ ipcMain.handle(
 // Complete worktree merge after conflicts are resolved
 ipcMain.handle(
   'complete-worktree-merge',
-  async (event, { projectPath, sourceBranch, worktreePath, resolutions, hasStashedMainRepo }) => {
+  async (
+    event,
+    { projectPath, sourceBranch, worktreePath, resolutions, hasStashedMainRepo }
+  ) => {
     try {
       console.log('Completing worktree merge with resolutions...')
 
@@ -1680,7 +1702,10 @@ ipcMain.handle(
       console.log('Discarding worktree changes for branch:', sourceBranch)
 
       // Step 1: Get worktree information from git directly
-      const worktreeInfo = await getWorktreeInfoFromGit(projectPath, sourceBranch)
+      const worktreeInfo = await getWorktreeInfoFromGit(
+        projectPath,
+        sourceBranch
+      )
 
       if (!worktreeInfo) {
         throw new Error(`Worktree for branch ${sourceBranch} not found`)
@@ -2105,7 +2130,7 @@ ipcMain.handle('check-claude-authentication', async () => {
       console.log('✅ [Auth Check] Claude SDK is authenticated')
       return {
         authenticated: true,
-        currentProvider: activeProvider
+        currentProvider: activeProvider,
       }
     }
 
@@ -2115,7 +2140,7 @@ ipcMain.handle('check-claude-authentication', async () => {
       authenticated: false,
       error: 'SDK returned no messages',
       errorType: 'unknown',
-      currentProvider: activeProvider
+      currentProvider: activeProvider,
     }
   } catch (error: any) {
     console.error('❌ [Auth Check] Authentication check failed:', error)
@@ -2127,7 +2152,10 @@ ipcMain.handle('check-claude-authentication', async () => {
     let suggestedProvider: 'bedrock' | 'vertex' | undefined
 
     // Detect error type and suggest provider
-    if (errorMessage.includes('model identifier') || errorMessage.includes('invalid model')) {
+    if (
+      errorMessage.includes('model identifier') ||
+      errorMessage.includes('invalid model')
+    ) {
       errorType = 'model'
       suggestedProvider = 'bedrock'
     } else if (
@@ -2154,7 +2182,7 @@ ipcMain.handle('check-claude-authentication', async () => {
       error: errorMessage,
       errorType,
       suggestedProvider,
-      currentProvider: activeProvider
+      currentProvider: activeProvider,
     }
   }
 })
@@ -2230,34 +2258,42 @@ ipcMain.handle('get-provider-credentials', async (event, provider: string) => {
 /**
  * Save credentials for a specific provider
  */
-ipcMain.handle('save-provider-credentials', async (event, provider: string, credentials: any) => {
-  try {
-    const { saveCredentials, setActiveProvider } = await import('./credential-manager')
-    await saveCredentials(provider as any, credentials)
-    // Also set this as the active provider
-    await setActiveProvider(provider as any)
-    console.log('✅ [Provider] Credentials saved for:', provider)
-    return { success: true }
-  } catch (error: any) {
-    console.error('❌ [Provider] Failed to save credentials:', error)
-    return { error: error?.message || String(error) }
+ipcMain.handle(
+  'save-provider-credentials',
+  async (event, provider: string, credentials: any) => {
+    try {
+      const { saveCredentials, setActiveProvider } = await import(
+        './credential-manager'
+      )
+      await saveCredentials(provider as any, credentials)
+      // Also set this as the active provider
+      await setActiveProvider(provider as any)
+      console.log('✅ [Provider] Credentials saved for:', provider)
+      return { success: true }
+    } catch (error: any) {
+      console.error('❌ [Provider] Failed to save credentials:', error)
+      return { error: error?.message || String(error) }
+    }
   }
-})
+)
 
 /**
  * Delete credentials for a specific provider
  */
-ipcMain.handle('delete-provider-credentials', async (event, provider: string) => {
-  try {
-    const { deleteCredentials } = await import('./credential-manager')
-    await deleteCredentials(provider as any)
-    console.log('✅ [Provider] Credentials deleted for:', provider)
-    return { success: true }
-  } catch (error: any) {
-    console.error('❌ [Provider] Failed to delete credentials:', error)
-    return { error: error?.message || String(error) }
+ipcMain.handle(
+  'delete-provider-credentials',
+  async (event, provider: string) => {
+    try {
+      const { deleteCredentials } = await import('./credential-manager')
+      await deleteCredentials(provider as any)
+      console.log('✅ [Provider] Credentials deleted for:', provider)
+      return { success: true }
+    } catch (error: any) {
+      console.error('❌ [Provider] Failed to delete credentials:', error)
+      return { error: error?.message || String(error) }
+    }
   }
-})
+)
 
 /**
  * Detect existing environment variables for a provider
@@ -2276,64 +2312,71 @@ ipcMain.handle('detect-existing-env-vars', async (event, provider: string) => {
 /**
  * Test provider connection with given credentials
  */
-ipcMain.handle('test-provider-connection', async (event, provider: string, credentials: any) => {
-  try {
-    console.log('🔍 [Provider] Testing connection for:', provider)
+ipcMain.handle(
+  'test-provider-connection',
+  async (event, provider: string, credentials: any) => {
+    try {
+      console.log('🔍 [Provider] Testing connection for:', provider)
 
-    // Temporarily set environment variables based on provider
-    const originalEnv = { ...process.env }
+      // Temporarily set environment variables based on provider
+      const originalEnv = { ...process.env }
 
-    // Clear any existing provider env vars first
-    delete process.env.CLAUDE_CODE_USE_BEDROCK
-    delete process.env.CLAUDE_CODE_USE_VERTEX
+      // Clear any existing provider env vars first
+      delete process.env.CLAUDE_CODE_USE_BEDROCK
+      delete process.env.CLAUDE_CODE_USE_VERTEX
 
-    // Set provider-specific env vars
-    if (provider === 'bedrock') {
-      process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-      process.env.AWS_ACCESS_KEY_ID = credentials.accessKeyId
-      process.env.AWS_SECRET_ACCESS_KEY = credentials.secretAccessKey
-      if (credentials.sessionToken) process.env.AWS_SESSION_TOKEN = credentials.sessionToken
-      if (credentials.region) process.env.AWS_REGION = credentials.region
-      if (credentials.model) process.env.ANTHROPIC_MODEL = credentials.model
-    } else if (provider === 'vertex') {
-      process.env.CLAUDE_CODE_USE_VERTEX = '1'
-      process.env.CLOUD_ML_REGION = credentials.region || 'global'
-      process.env.ANTHROPIC_VERTEX_PROJECT_ID = credentials.projectId
-      if (credentials.model) process.env.ANTHROPIC_MODEL = credentials.model
-      if (credentials.smallFastModel) process.env.ANTHROPIC_SMALL_FAST_MODEL = credentials.smallFastModel
-      if (credentials.disablePromptCaching) process.env.DISABLE_PROMPT_CACHING = '1'
-    } else if (provider === 'anthropic') {
-      if (credentials.apiKey) process.env.ANTHROPIC_API_KEY = credentials.apiKey
+      // Set provider-specific env vars
+      if (provider === 'bedrock') {
+        process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+        process.env.AWS_ACCESS_KEY_ID = credentials.accessKeyId
+        process.env.AWS_SECRET_ACCESS_KEY = credentials.secretAccessKey
+        if (credentials.sessionToken)
+          process.env.AWS_SESSION_TOKEN = credentials.sessionToken
+        if (credentials.region) process.env.AWS_REGION = credentials.region
+        if (credentials.model) process.env.ANTHROPIC_MODEL = credentials.model
+      } else if (provider === 'vertex') {
+        process.env.CLAUDE_CODE_USE_VERTEX = '1'
+        process.env.CLOUD_ML_REGION = credentials.region || 'global'
+        process.env.ANTHROPIC_VERTEX_PROJECT_ID = credentials.projectId
+        if (credentials.model) process.env.ANTHROPIC_MODEL = credentials.model
+        if (credentials.smallFastModel)
+          process.env.ANTHROPIC_SMALL_FAST_MODEL = credentials.smallFastModel
+        if (credentials.disablePromptCaching)
+          process.env.DISABLE_PROMPT_CACHING = '1'
+      } else if (provider === 'anthropic') {
+        if (credentials.apiKey)
+          process.env.ANTHROPIC_API_KEY = credentials.apiKey
+      }
+
+      // Test connection with a minimal query
+      const { query } = await import('@anthropic-ai/claude-agent-sdk')
+      const testQuery = query({
+        prompt: 'hi',
+        options: {
+          cwd: '/tmp',
+          allowedTools: [],
+          permissionMode: 'bypassPermissions',
+        },
+      })
+
+      const firstMessage = await testQuery.next()
+
+      // Restore original environment
+      process.env = originalEnv
+
+      if (firstMessage.done === false) {
+        console.log('✅ [Provider] Connection test successful')
+        return { success: true }
+      }
+
+      console.log('❌ [Provider] Connection test failed - no response')
+      return { success: false, error: 'No response from provider' }
+    } catch (error: any) {
+      console.error('❌ [Provider] Connection test failed:', error)
+      return { success: false, error: error?.message || String(error) }
     }
-
-    // Test connection with a minimal query
-    const { query } = await import('@anthropic-ai/claude-agent-sdk')
-    const testQuery = query({
-      prompt: 'hi',
-      options: {
-        cwd: '/tmp',
-        allowedTools: [],
-        permissionMode: 'bypassPermissions',
-      },
-    })
-
-    const firstMessage = await testQuery.next()
-
-    // Restore original environment
-    process.env = originalEnv
-
-    if (firstMessage.done === false) {
-      console.log('✅ [Provider] Connection test successful')
-      return { success: true }
-    }
-
-    console.log('❌ [Provider] Connection test failed - no response')
-    return { success: false, error: 'No response from provider' }
-  } catch (error: any) {
-    console.error('❌ [Provider] Connection test failed:', error)
-    return { success: false, error: error?.message || String(error) }
   }
-})
+)
 
 /**
  * Open an external URL in the default browser

@@ -449,6 +449,14 @@ export const createWorktree = async (
       )
     }
 
+    // STEP 5.5: Create checkpoint commit in new worktree
+    console.log(`Creating checkpoint commit in new worktree: ${uniqueBranchName}`)
+    await execAsync(
+      `git commit --allow-empty -m "checkpoint: ${uniqueBranchName}"`,
+      { cwd: worktreePath }
+    )
+    console.log('✅ Created checkpoint commit')
+
     // STEP 6: Apply stashed changes to worktree
     if (hasStashedChanges && stashUuid) {
       await applyStashedChanges(projectPath, worktreePath)

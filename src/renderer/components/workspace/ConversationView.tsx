@@ -199,6 +199,7 @@ export function ConversationView({
 
   const [isWorktreeValid, setIsWorktreeValid] = useState<boolean>(true)
   const [isConversationLogValid, setIsConversationLogValid] = useState<boolean>(true)
+  const [isInitializingConversation, setIsInitializingConversation] = useState<boolean>(false)
 
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null)
@@ -962,6 +963,9 @@ export function ConversationView({
           return
         }
 
+        // Mark conversation as initializing
+        setIsInitializingConversation(true)
+
         // Ensure git repository is initialized
         console.log('Ensuring git repository is initialized...')
         const finalBranch = await ensureGitRepositoryInitialized(
@@ -1023,6 +1027,9 @@ export function ConversationView({
         // Update selectedConversation immediately so real-time message updates work
         // This ensures selectedConversationRef.current.promptId matches the new promptId
         setSelectedConversation(conversation)
+
+        // Mark initialization as complete - worktree is now ready
+        setIsInitializingConversation(false)
 
         // Save enhanced prompt to history
         console.log('💾 Saving enhanced prompt to history...')
@@ -1382,6 +1389,9 @@ export function ConversationView({
       }
     } catch (error) {
       console.error('❌ Error executing conversation:', error)
+
+      // Reset initialization state on error
+      setIsInitializingConversation(false)
 
       // ✅ State update handled by main process
       // Main process automatically broadcasts 'error' status
@@ -2042,7 +2052,17 @@ export function ConversationView({
       )}
 
       {/* Input Area - Show for existing conversations (with or without messages) */}
-      {!isNewConversation && !isWorktreeValid ? (
+      {isInitializingConversation ? (
+        /* Show loading state while initializing conversation */
+        <div className="flex-shrink-0 flex items-center justify-center" style={{ minHeight: '160px' }}>
+          <p
+            className="text-center text-sm"
+            style={{ color: theme.text.secondary }}
+          >
+            Initializing conversation...
+          </p>
+        </div>
+      ) : !isNewConversation && !isWorktreeValid ? (
         /* Show message when worktree doesn't exist - centered in full input height */
         <div className="flex-shrink-0 flex items-center justify-center" style={{ minHeight: '160px' }}>
           <p

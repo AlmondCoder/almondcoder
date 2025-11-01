@@ -28,6 +28,10 @@ const API = {
   getPromptAgents: () => ipcRenderer.invoke('get-prompt-agents'),
   savePromptAgents: (agents: any[]) =>
     ipcRenderer.invoke('save-prompt-agents', agents),
+  /**
+   * Check if a directory is a Git repository. If not, automatically initializes it.
+   * Returns true if it's a git repo or was successfully initialized, false if init failed.
+   */
   isGitRepository: (path: string) =>
     ipcRenderer.invoke('is-git-repository', path),
   getGitBranches: (path: string) =>

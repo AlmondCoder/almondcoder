@@ -108,7 +108,7 @@ export interface ColorPalette {
 export const themes: Record<ThemeName, ColorPalette> = {
   dark: {
     background: {
-      primary: 'rgb(17 24 39)', // gray-900
+      primary: '#DEDEDB', // gray-900
       secondary: 'rgb(31 41 55)', // gray-800
       tertiary: 'rgb(55 65 81)', // gray-700
       card: 'rgb(31 41 55)', // gray-800
