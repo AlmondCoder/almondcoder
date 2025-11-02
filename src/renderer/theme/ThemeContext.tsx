@@ -180,6 +180,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     root.style.setProperty('--color-bg-card', theme.background.card)
     root.style.setProperty('--color-bg-input', theme.background.input)
     root.style.setProperty('--color-bg-overlay', theme.background.overlay)
+    root.style.setProperty('--color-bg-black', theme.background.black)
+    root.style.setProperty('--color-bg-sidebar', theme.background.sidebar)
 
     // Border colors
     root.style.setProperty('--color-border-primary', theme.border.primary)
@@ -418,6 +420,8 @@ export const createThemeClasses = (theme: ColorPalette) => ({
   bgCard: 'bg-[var(--color-bg-card)]',
   bgInput: 'bg-[var(--color-bg-input)]',
   bgOverlay: 'bg-[var(--color-bg-overlay)]',
+  bgBlack: 'bg-[var(--color-bg-black)]',
+  bgSidebar: 'bg-[var(--color-bg-sidebar)]',
 
   // Border classes
   borderPrimary: 'border-[var(--color-border-primary)]',

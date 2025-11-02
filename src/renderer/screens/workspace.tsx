@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MessageSquare, GitMerge, FolderOpen, User } from 'lucide-react'
+import { MessagesSquare, GitMerge, User } from 'lucide-react'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
 import { Overview } from '../components/workspace/Overview'
 import { Prompts } from '../components/workspace/Prompts'
@@ -40,7 +40,7 @@ export function WorkspaceScreen() {
   const [activeSection, setActiveSection] = useState('prompts')
 
   const topMenuItems = [
-    { icon: MessageSquare, label: 'Prompts', key: 'prompts' },
+    { icon: MessagesSquare, label: 'Prompts', key: 'prompts' },
     { icon: GitMerge, label: 'Merge', key: 'merge' },
   ]
 
@@ -61,17 +61,15 @@ export function WorkspaceScreen() {
 
   return (
     <div
-      className={`h-screen ${themeClasses.bgPrimary} ${themeClasses.textPrimary} flex`}
+      className={`h-screen ${themeClasses.bgOverlay} ${themeClasses.textPrimary} flex`}
     >
       {/* Vertical Sidebar Menu */}
       <div
-        className={`${themeClasses.bgSecondary} border-r ${themeClasses.borderPrimary} w-16 flex flex-col items-center py-4`}
+        className={`${themeClasses.bgOverlay} w-16 flex flex-col items-center py-4`}
       >
         {/* App Logo at top */}
         <div className="mb-8">
-          <div
-            className={`w-12 h-12 rounded-xl bg-[rgb(45,45,45)] flex items-center justify-center p-2`}
-          >
+          <div className={`w-16 h-16 flex items-center justify-center p-2`}>
             <img
               alt="Almond Coder"
               className="w-full h-full object-contain"
@@ -84,16 +82,18 @@ export function WorkspaceScreen() {
         <div className="flex flex-col items-center space-y-1">
           {topMenuItems.map((item, index) => (
             <button
-              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 group relative ${
-                activeSection === item.key
-                  ? `bg-[rgb(45,45,45)] text-white`
-                  : `${themeClasses.textSecondary} hover:bg-[rgba(0,0,0,0.05)]`
-              }`}
-              key={index}
+              className={`w-14 h-14 flex items-center justify-center rounded-lg transition-all duration-200 group relative`}
+              key={item.key}
               onClick={() => setActiveSection(item.key)}
               title={item.label}
             >
-              <item.icon className="w-6 h-6" />
+              <item.icon
+                className={`w-6 h-6 transition-colors duration-200 ${
+                  activeSection === item.key
+                    ? `${themeClasses.bgBlack} fill-black`
+                    : `${themeClasses.textSecondary}`
+                }`}
+              />
               {/* Tooltip on hover */}
               <span
                 className={`absolute left-full ml-2 px-3 py-1.5 rounded-md ${themeClasses.bgTertiary} ${themeClasses.textPrimary} text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg z-50`}
@@ -113,7 +113,7 @@ export function WorkspaceScreen() {
             <button
               className={`w-12 h-12 flex items-center justify-center rounded-lg transition-all duration-200 group relative ${
                 activeSection === item.key
-                  ? `bg-[rgb(45,45,45)] text-white`
+                  ? `text-white`
                   : `${themeClasses.textSecondary} hover:bg-[rgba(0,0,0,0.05)]`
               }`}
               key={index}

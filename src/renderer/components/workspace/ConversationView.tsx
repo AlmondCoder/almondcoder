@@ -191,15 +191,19 @@ export function ConversationView({
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isLoadingConversation, setIsLoadingConversation] = useState(false)
-  const [conversationLoadError, setConversationLoadError] = useState<string | null>(null)
+  const [conversationLoadError, setConversationLoadError] = useState<
+    string | null
+  >(null)
 
   const [selectedBranch, setSelectedBranch] = useState<string>('')
   const [selectedWorktree, setSelectedWorktree] = useState<string | null>(null)
   const [isAutoAcceptEnabled, setIsAutoAcceptEnabled] = useState(false)
 
   const [isWorktreeValid, setIsWorktreeValid] = useState<boolean>(true)
-  const [isConversationLogValid, setIsConversationLogValid] = useState<boolean>(true)
-  const [isInitializingConversation, setIsInitializingConversation] = useState<boolean>(false)
+  const [isConversationLogValid, setIsConversationLogValid] =
+    useState<boolean>(true)
+  const [isInitializingConversation, setIsInitializingConversation] =
+    useState<boolean>(false)
 
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null)
@@ -1417,7 +1421,7 @@ export function ConversationView({
             <div
               className="animate-spin w-12 h-12 border-4 border-t-transparent rounded-full mx-auto mb-4"
               style={{
-                borderColor: `${theme.border.primary} ${theme.border.primary} ${theme.border.primary} transparent`
+                borderColor: `${theme.border.primary} ${theme.border.primary} ${theme.border.primary} transparent`,
               }}
             ></div>
             <p className="text-lg font-medium">Loading conversation...</p>
@@ -1527,10 +1531,12 @@ export function ConversationView({
             </div>
           </div>
         </div>
-      ) : !isLoadingConversation && !conversationLoadError && chatMessages.length > 0 ? (
+      ) : !isLoadingConversation &&
+        !conversationLoadError &&
+        chatMessages.length > 0 ? (
         /* Existing conversation with messages */
         <div
-          className={`flex-1 overflow-y-auto ${isLightTheme ? 'bg-white' : themeClasses.bgSecondary} rounded-lg p-6 space-y-4 mb-2`}
+          className={`flex-1 overflow-y-auto rounded-lg p-6 space-y-4 mb-2`}
           ref={chatMessagesScrollRef}
         >
           {chatMessages.map((message, index) => {
@@ -1574,11 +1580,7 @@ export function ConversationView({
                 return (
                   <div className="mb-4 flex justify-end" key={message.id}>
                     <div
-                      className={`max-w-[80%] rounded-lg px-4 py-2.5 whitespace-pre-wrap select-text cursor-text ${
-                        isLightTheme
-                          ? 'bg-gray-100 text-gray-800'
-                          : 'bg-gray-700 text-gray-200'
-                      }`}
+                      className={`max-w-[80%] rounded-lg px-4 py-2.5 whitespace-pre-wrap select-text cursor-text ${themeClasses.bgSidebar}`}
                       style={{ fontSize: 'var(--font-size-base)' }}
                     >
                       {message.text}
@@ -2054,7 +2056,10 @@ export function ConversationView({
       {/* Input Area - Show for existing conversations (with or without messages) */}
       {isInitializingConversation ? (
         /* Show loading state while initializing conversation */
-        <div className="flex-shrink-0 flex items-center justify-center" style={{ minHeight: '160px' }}>
+        <div
+          className="flex-shrink-0 flex items-center justify-center"
+          style={{ minHeight: '160px' }}
+        >
           <p
             className="text-center text-sm"
             style={{ color: theme.text.secondary }}
@@ -2064,207 +2069,213 @@ export function ConversationView({
         </div>
       ) : !isNewConversation && !isWorktreeValid ? (
         /* Show message when worktree doesn't exist - centered in full input height */
-        <div className="flex-shrink-0 flex items-center justify-center" style={{ minHeight: '160px' }}>
+        <div
+          className="flex-shrink-0 flex items-center justify-center"
+          style={{ minHeight: '160px' }}
+        >
           <p
             className="text-center text-sm"
             style={{ color: theme.text.tertiary }}
           >
-            You can no longer edit this prompt as it is already merged or deleted
+            You can no longer edit this prompt as it is already merged or
+            deleted
           </p>
         </div>
-      ) : !isNewConversation && (
-        <div className="flex-shrink-0">
-          {/* Status Bar - Above Input */}
-          {/* ================================================================ */}
-          {/* LOGIC: Show different status based on conversation state:        */}
-          {/* - waiting_permission: Show pending tool details + Accept button  */}
-          {/* - running: Show "Claude is working..." message                   */}
-          {/* - default: Show "Ready to execute" message                       */}
-          {/* ================================================================ */}
-          <div className="bg-[#2D2D2D] border-t border-gray-700 rounded-t-lg px-4 py-3 flex items-center justify-between">
-            {/* LEFT SIDE: Status message or pending tool info */}
-            <div className="flex items-center gap-3 flex-1">
-              {(() => {
-                const busyState = busyConversations.get(
-                  selectedConversation.promptId
-                )
+      ) : (
+        !isNewConversation && (
+          <div className="flex-shrink-0">
+            {/* Status Bar - Above Input */}
+            {/* ================================================================ */}
+            {/* LOGIC: Show different status based on conversation state:        */}
+            {/* - waiting_permission: Show pending tool details + Accept button  */}
+            {/* - running: Show "Claude is working..." message                   */}
+            {/* - default: Show "Ready to execute" message                       */}
+            {/* ================================================================ */}
+            <div className="bg-[#2D2D2D] border-t border-gray-700 rounded-t-lg px-4 py-3 flex items-center justify-between">
+              {/* LEFT SIDE: Status message or pending tool info */}
+              <div className="flex items-center gap-3 flex-1">
+                {(() => {
+                  const busyState = busyConversations.get(
+                    selectedConversation.promptId
+                  )
 
-                // Show pending permission details
-                if (
-                  busyState?.status === 'waiting_permission' &&
-                  busyState.pendingPermission
-                ) {
-                  const { toolName } = busyState.pendingPermission
+                  // Show pending permission details
+                  if (
+                    busyState?.status === 'waiting_permission' &&
+                    busyState.pendingPermission
+                  ) {
+                    const { toolName } = busyState.pendingPermission
+                    return (
+                      <span className="text-sm text-white">
+                        {toolName} - Do you want to accept changes?
+                      </span>
+                    )
+                  }
+
+                  // Show running indicator with spinner
+                  if (busyState?.status === 'running') {
+                    return (
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center space-x-1">
+                          <div className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"></div>
+                          <div
+                            className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"
+                            style={{ animationDelay: '0.1s' }}
+                          ></div>
+                          <div
+                            className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"
+                            style={{ animationDelay: '0.2s' }}
+                          ></div>
+                        </div>
+                        <span className="text-sm text-gray-300">
+                          Claude is working...
+                        </span>
+                      </div>
+                    )
+                  }
+
+                  // Default: Ready state
                   return (
-                    <span className="text-sm text-white">
-                      {toolName} - Do you want to accept changes?
+                    <span className="text-sm text-gray-400">
+                      Ready to execute
                     </span>
                   )
-                }
+                })()}
+              </div>
 
-                // Show running indicator with spinner
-                if (busyState?.status === 'running') {
-                  return (
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center space-x-1">
-                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"></div>
-                        <div
-                          className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"
-                          style={{ animationDelay: '0.1s' }}
-                        ></div>
-                        <div
-                          className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"
-                          style={{ animationDelay: '0.2s' }}
-                        ></div>
-                      </div>
-                      <span className="text-sm text-gray-300">
-                        Claude is working...
-                      </span>
-                    </div>
-                  )
-                }
+              {/* RIGHT SIDE: Auto Accept toggle + Accept button */}
+              <div className="flex items-center gap-3">
+                {/* Auto Accept Toggle */}
+                <button
+                  className={`relative w-14 h-7 rounded-full transition-colors ${
+                    isAutoAcceptEnabled ? 'bg-green-500' : 'bg-gray-600'
+                  }`}
+                  onClick={async () => {
+                    const newValue = !isAutoAcceptEnabled
+                    setIsAutoAcceptEnabled(newValue)
 
-                // Default: Ready state
-                return (
-                  <span className="text-sm text-gray-400">
-                    Ready to execute
-                  </span>
-                )
-              })()}
-            </div>
-
-            {/* RIGHT SIDE: Auto Accept toggle + Accept button */}
-            <div className="flex items-center gap-3">
-              {/* Auto Accept Toggle */}
-              <button
-                className={`relative w-14 h-7 rounded-full transition-colors ${
-                  isAutoAcceptEnabled ? 'bg-green-500' : 'bg-gray-600'
-                }`}
-                onClick={async () => {
-                  const newValue = !isAutoAcceptEnabled
-                  setIsAutoAcceptEnabled(newValue)
-
-                  // ============================================================================
-                  // ✅ FIX: Immediately update main process cache (real-time)
-                  // ============================================================================
-                  // LOGIC: This IPC call updates the in-memory cache in the main process
-                  // INSTANTLY, so the running canUseTool callback uses the fresh value.
-                  // This happens BEFORE the database write, ensuring zero delay.
-                  if (selectedConversation.promptId) {
-                    console.log(
-                      '⚡ Updating auto-accept cache in main process:',
-                      newValue
-                    )
-                    window.App.updateAutoAcceptState({
-                      promptId: selectedConversation.promptId,
-                      enabled: newValue,
-                    })
-                  }
-
-                  // Then persist toggle state to database (async, for persistence)
-                  if (selectedConversation.promptId) {
-                    try {
+                    // ============================================================================
+                    // ✅ FIX: Immediately update main process cache (real-time)
+                    // ============================================================================
+                    // LOGIC: This IPC call updates the in-memory cache in the main process
+                    // INSTANTLY, so the running canUseTool callback uses the fresh value.
+                    // This happens BEFORE the database write, ensuring zero delay.
+                    if (selectedConversation.promptId) {
                       console.log(
-                        '💾 Saving auto-accept state to database:',
+                        '⚡ Updating auto-accept cache in main process:',
                         newValue
                       )
+                      window.App.updateAutoAcceptState({
+                        promptId: selectedConversation.promptId,
+                        enabled: newValue,
+                      })
+                    }
 
-                      // Reload prompt history to get latest data
-                      const currentHistory =
-                        await window.App.getEnhancedPromptHistory(
-                          projectContext?.projectPath ||
-                            selectedConversation.projectPath
-                        )
-                      const prompt = currentHistory.find(
-                        (p: any) => p.id === selectedConversation.promptId
-                      )
-
-                      if (prompt) {
-                        await window.App.updateEnhancedPrompt({
-                          ...prompt,
-                          startExecutionTime: new Date(
-                            prompt.startExecutionTime
-                          ),
-                          createdAt: new Date(prompt.createdAt),
-                          updatedAt: new Date(),
-                          autoAcceptEnabled: newValue,
-                        })
+                    // Then persist toggle state to database (async, for persistence)
+                    if (selectedConversation.promptId) {
+                      try {
                         console.log(
-                          '✅ Auto-accept state saved successfully to database'
+                          '💾 Saving auto-accept state to database:',
+                          newValue
+                        )
+
+                        // Reload prompt history to get latest data
+                        const currentHistory =
+                          await window.App.getEnhancedPromptHistory(
+                            projectContext?.projectPath ||
+                              selectedConversation.projectPath
+                          )
+                        const prompt = currentHistory.find(
+                          (p: any) => p.id === selectedConversation.promptId
+                        )
+
+                        if (prompt) {
+                          await window.App.updateEnhancedPrompt({
+                            ...prompt,
+                            startExecutionTime: new Date(
+                              prompt.startExecutionTime
+                            ),
+                            createdAt: new Date(prompt.createdAt),
+                            updatedAt: new Date(),
+                            autoAcceptEnabled: newValue,
+                          })
+                          console.log(
+                            '✅ Auto-accept state saved successfully to database'
+                          )
+                        }
+                      } catch (error) {
+                        console.error(
+                          '❌ Error saving auto-accept state to database:',
+                          error
                         )
                       }
-                    } catch (error) {
-                      console.error(
-                        '❌ Error saving auto-accept state to database:',
-                        error
-                      )
                     }
+                  }}
+                  title={
+                    isAutoAcceptEnabled
+                      ? 'Auto-accept is ON - tools will execute immediately'
+                      : 'Auto-accept is OFF - tools will ask for permission'
+                  }
+                >
+                  <span
+                    className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                      isAutoAcceptEnabled ? 'right-1' : 'left-1'
+                    }`}
+                  />
+                </button>
+                <span className="text-xs text-gray-300">Auto accept</span>
+
+                {/* Accept Button or Spinner */}
+                {busyConversations.get(selectedConversation.promptId)
+                  ?.status === 'waiting_permission' && (
+                  <button
+                    className="bg-white text-gray-900 hover:bg-gray-100 px-4 py-1.5 rounded text-sm font-medium transition-colors"
+                    onClick={handleAcceptPermission}
+                    title="Accept this tool execution"
+                  >
+                    Accept
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Textarea with integrated pill selector */}
+            <div className="space-y-3">
+              <PromptInput
+                availableBranches={availableBranches}
+                getAvailableBranchesForNewPrompt={
+                  getAvailableBranchesForNewPrompt
+                }
+                isExecuting={
+                  busyConversations.get(selectedConversation.promptId)
+                    ?.status === 'running'
+                }
+                isNewConversation={false}
+                onBranchSelect={setSelectedBranch}
+                onExecute={handleExecute}
+                onNewConversation={() => {
+                  if (
+                    isNewConversation &&
+                    selectedConversation.promptId !== '+new'
+                  ) {
+                    setSelectedConversation(newConversation())
                   }
                 }}
-                title={
-                  isAutoAcceptEnabled
-                    ? 'Auto-accept is ON - tools will execute immediately'
-                    : 'Auto-accept is OFF - tools will ask for permission'
-                }
-              >
-                <span
-                  className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
-                    isAutoAcceptEnabled ? 'right-1' : 'left-1'
-                  }`}
-                />
-              </button>
-              <span className="text-xs text-gray-300">Auto accept</span>
-
-              {/* Accept Button or Spinner */}
-              {busyConversations.get(selectedConversation.promptId)?.status ===
-                'waiting_permission' && (
-                <button
-                  className="bg-white text-gray-900 hover:bg-gray-100 px-4 py-1.5 rounded text-sm font-medium transition-colors"
-                  onClick={handleAcceptPermission}
-                  title="Accept this tool execution"
-                >
-                  Accept
-                </button>
-              )}
+                onWorktreeSelect={setSelectedWorktree}
+                projectContext={projectContext}
+                selectedBranch={selectedBranch}
+              />
             </div>
-          </div>
 
-          {/* Textarea with integrated pill selector */}
-          <div className="space-y-3">
-            <PromptInput
-              availableBranches={availableBranches}
-              getAvailableBranchesForNewPrompt={
-                getAvailableBranchesForNewPrompt
-              }
-              isExecuting={
-                busyConversations.get(selectedConversation.promptId)?.status ===
-                'running'
-              }
-              isNewConversation={false}
-              onBranchSelect={setSelectedBranch}
-              onExecute={handleExecute}
-              onNewConversation={() => {
-                if (
-                  isNewConversation &&
-                  selectedConversation.promptId !== '+new'
-                ) {
-                  setSelectedConversation(newConversation())
-                }
-              }}
-              onWorktreeSelect={setSelectedWorktree}
-              projectContext={projectContext}
-              selectedBranch={selectedBranch}
-            />
+            {/* Status Messages */}
+            {!projectContext && (
+              <div className="mt-3 text-sm text-yellow-400 bg-yellow-900/20 p-3 rounded-lg">
+                ⚠️ No project selected. Please go to the main screen to select a
+                project folder and root branch.
+              </div>
+            )}
           </div>
-
-          {/* Status Messages */}
-          {!projectContext && (
-            <div className="mt-3 text-sm text-yellow-400 bg-yellow-900/20 p-3 rounded-lg">
-              ⚠️ No project selected. Please go to the main screen to select a
-              project folder and root branch.
-            </div>
-          )}
-        </div>
+        )
       )}
     </div>
   )

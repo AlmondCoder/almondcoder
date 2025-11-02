@@ -445,7 +445,7 @@ export function Prompts({ projectContext }: PromptsProps) {
     >
       {/* First Section - Prompt History (16.67% width) */}
       <div
-        className={`w-1/6 border-r ${themeClasses.borderPrimary} p-4 overflow-y-auto`}
+        className={`w-1/6 border-r ${themeClasses.borderPrimary} p-4 overflow-y-auto ${themeClasses.bgSidebar}`}
       >
         <div className="space-y-3">
           {/* Create new prompt Option */}
@@ -852,7 +852,11 @@ export function Prompts({ projectContext }: PromptsProps) {
 
         {/* Agent Management View */}
         {viewMode === 'agents' && (
-          <AgentView agents={agents} setAgents={setAgents} triggerNewAgent={triggerNewAgent} />
+          <AgentView
+            agents={agents}
+            setAgents={setAgents}
+            triggerNewAgent={triggerNewAgent}
+          />
         )}
 
         {/* Prompt View - Only show when not in agents mode */}
