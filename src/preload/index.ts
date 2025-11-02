@@ -138,10 +138,11 @@ const API = {
     onOutput?: (data: { type: string; data: string }) => void
   ) => {
     if (onOutput) {
-      const handler = (_event: any, data: { type: string; data: string }) => {
+      const handler = (_event: any, data: { type: string; data: string; promptId?: string }) => {
         console.log('🔌 [Preload] Received IPC message:', {
           type: data.type,
           dataLength: data.data?.length,
+          promptId: data.promptId,  // Log promptId for debugging
         })
         onOutput(data)
       }

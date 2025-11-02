@@ -1151,6 +1151,11 @@ export function ConversationView({
       // Setup message handler for Claude SDK output
       console.log('📡 Setting up message handler for Claude SDK...')
       console.log('📡 Handler will process messages for promptId:', promptId)
+      console.log('📡 Handler will write to file:', conversationLogPath)
+
+      // Capture conversationLogPath in a local constant to ensure closure captures the correct value
+      const capturedConversationLogPath = conversationLogPath
+      const capturedPromptId = promptId
 
       const handleClaudeMessage = async (data: {
         type: string
@@ -1162,13 +1167,23 @@ export function ConversationView({
         // ============================================================================
         // LOGIC: Each handler receives ALL messages on the 'command-output' channel.
         // If we don't filter, this handler will process messages from OTHER conversations,
-        // causing session ID contamination (lines 1072, 1092, 1108).
+        // causing session ID contamination.
         // By checking if the message's promptId matches THIS conversation's promptId,
         // we ensure only the correct handler processes each message.
-        if (data.promptId && data.promptId !== promptId) {
+
+        // IMPORTANT: Check for missing promptId - if undefined, reject the message
+        // This prevents messages without promptId from being processed by all handlers
+        if (!data.promptId) {
+          console.warn(
+            `⚠️ [FILTER] Received message without promptId - rejecting to prevent cross-contamination`
+          )
+          return
+        }
+
+        if (data.promptId !== capturedPromptId) {
           console.log(
             `⏭️ [FILTER] Ignoring message from different conversation:`,
-            `received: ${data.promptId}, expected: ${promptId}`
+            `received: ${data.promptId}, expected: ${capturedPromptId}`
           )
           return // Exit early - prevents session ID contamination
         }
@@ -1177,6 +1192,7 @@ export function ConversationView({
           '✅ [FILTER] Message belongs to this conversation, processing...'
         )
         console.log('🔔 handleClaudeMessage called!', data)
+        console.log('📁 Will write to file:', capturedConversationLogPath)
         try {
           console.log('🔍 Raw data received:', data)
           const sdkMessage = JSON.parse(data.data)
@@ -1186,8 +1202,9 @@ export function ConversationView({
           )
 
           // Always log to conversation file (for all conversations, even background ones)
+          // Use captured path to ensure we write to the correct file
           await updateConversationFile(
-            conversationLogPath,
+            capturedConversationLogPath,
             { content: sdkMessage },
             Response.ai
           )
@@ -1196,21 +1213,21 @@ export function ConversationView({
           // This enables parallel conversations - background ones save to file only
           // Use ref to avoid stale closure when user switches conversations
           const isSelectedConversation =
-            selectedConversationRef.current.promptId === promptId
+            selectedConversationRef.current.promptId === capturedPromptId
           console.log(
             '🔍 Is this the selected conversation?',
             isSelectedConversation,
             'selectedConversation.promptId:',
             selectedConversationRef.current.promptId,
             'current promptId:',
-            promptId
+            capturedPromptId
           )
 
           if (isSelectedConversation) {
             const newMessages = convertSDKMessageToChatMessage(sdkMessage)
             setChatMessages(prev => {
               // Double-check still selected before committing update
-              if (selectedConversationRef.current.promptId === promptId) {
+              if (selectedConversationRef.current.promptId === capturedPromptId) {
                 return [...prev, ...newMessages]
               }
               return prev // Don't update if conversation changed
@@ -1231,7 +1248,7 @@ export function ConversationView({
 
             // Update selectedConversation for resumption
             setSelectedConversation(prev => {
-              if (prev.promptId === promptId) {
+              if (prev.promptId === capturedPromptId) {
                 console.log('✅ Updated selectedConversation with session ID')
                 return { ...prev, aiSessionId: sdkMessage.session_id }
               }
@@ -1244,7 +1261,7 @@ export function ConversationView({
               const currentHistory = await window.App.getEnhancedPromptHistory(
                 projectContext?.projectPath || conversation.projectPath
               )
-              const prompt = currentHistory.find((p: any) => p.id === promptId)
+              const prompt = currentHistory.find((p: any) => p.id === capturedPromptId)
 
               if (prompt) {
                 await window.App.updateEnhancedPrompt({
@@ -1261,7 +1278,7 @@ export function ConversationView({
               } else {
                 console.warn(
                   '⚠️  Could not find prompt in database to update session ID:',
-                  promptId
+                  capturedPromptId
                 )
               }
             } catch (error) {
@@ -1280,7 +1297,7 @@ export function ConversationView({
             )
             // ✅ State update handled by main process
             // Main process automatically broadcasts 'completed' status
-            console.log('✅ Conversation completed:', promptId)
+            console.log('✅ Conversation completed:', capturedPromptId)
 
             // Report token usage from result message
             if (sdkMessage.usage && onTokenUsageUpdate) {
@@ -1300,14 +1317,14 @@ export function ConversationView({
 
             // Update prompt status to 'completed' in the database
             try {
-              const prompt = promptHistory.find(p => p.id === promptId)
+              const prompt = promptHistory.find(p => p.id === capturedPromptId)
               if (prompt) {
                 await window.App.updateEnhancedPrompt({
                   ...prompt,
                   status: 'completed',
                   updatedAt: new Date(),
                 })
-                console.log('✅ Updated prompt status to completed:', promptId)
+                console.log('✅ Updated prompt status to completed:', capturedPromptId)
 
                 // Refresh prompt history to show updated status
                 if (projectContext?.projectPath) {
