@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, X, ArrowUp, ChevronDown } from 'lucide-react'
+import { Plus, X, ArrowUp, CaretDown } from '@phosphor-icons/react'
 import { useTheme } from '../../theme/ThemeContext'
 
 interface PromptInputProps {
@@ -27,8 +27,8 @@ export function PromptInput({
   getAvailableBranchesForNewPrompt,
   onNewConversation,
 }: PromptInputProps) {
-  const { theme, themeName } = useTheme()
-  const isLightTheme = themeName === 'light'
+  const { theme } = useTheme()
+  const isLightTheme = true
 
   const [currentPrompt, setCurrentPrompt] = useState('')
   const [selectedPills, setSelectedPills] = useState<
@@ -319,7 +319,7 @@ export function PromptInput({
                   onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
                 >
                   <span>{selectedBranch || 'Select Branch'}</span>
-                  <ChevronDown className="w-3 h-3" />
+                  <CaretDown className="w-3 h-3" />
                 </button>
 
                 {isBranchDropdownOpen && availableBranches.length > 0 && (

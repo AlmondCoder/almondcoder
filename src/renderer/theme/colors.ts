@@ -1,4 +1,4 @@
-export type ThemeName = 'dark' | 'light'
+export type ThemeName = 'light'
 
 export interface ColorPalette {
   // Background colors
@@ -108,100 +108,6 @@ export interface ColorPalette {
 }
 
 export const themes: Record<ThemeName, ColorPalette> = {
-  dark: {
-    background: {
-      primary: 'rgb(222 222 19)', // gray-900
-      secondary: 'rgb(31 41 55)', // gray-800
-      tertiary: 'rgb(55 65 81)', // gray-700
-      card: 'rgb(222 222 219)', // gray-800
-      input: 'rgb(31 41 55)', // gray-800
-      overlay: 'rgba(31, 41, 55, 0.9)', // gray-800/90
-      labels: 'rgb(249, 250, 251)',
-      black: 'rgb(22,19,18)', // gray-400/50
-      sidebar: 'rgba (238, 238, 235)',
-    },
-    border: {
-      primary: 'rgb(55 65 81)', // gray-700
-      secondary: 'rgba(55, 65, 81, 0.3)', // gray-700/30
-      focus: 'rgb(222 222 219)', // blue-500
-      hover: 'rgba(75, 85, 99, 0.5)', // gray-600/50
-    },
-    text: {
-      primary: 'rgb(255 255 255)', // white
-      secondary: 'rgb(209 213 219)', // gray-300
-      tertiary: 'rgb(156 163 175)', // gray-400
-      accent: 'rgb(147 197 253)', // blue-300
-      muted: 'rgb(107 114 128)', // gray-500
-    },
-    status: {
-      success: 'rgb(34 197 94)', // green-500
-      warning: 'rgb(251 191 36)', // yellow-500
-      error: 'rgb(239 68 68)', // red-500
-      info: 'rgb(59 130 246)', // blue-500
-    },
-    interactive: {
-      primary: {
-        background: 'rgb(37 99 235)', // blue-600
-        backgroundHover: 'rgb(29 78 216)', // blue-700
-        text: 'rgb(255 255 255)', // white
-        border: 'rgb(37 99 235)', // blue-600
-        borderHover: 'rgb(29 78 216)', // blue-700
-      },
-      secondary: {
-        background: 'rgb(55 65 81)', // gray-700
-        backgroundHover: 'rgb(75 85 99)', // gray-600
-        text: 'rgb(255 255 255)', // white
-        border: 'rgb(55 65 81)', // gray-700
-        borderHover: 'rgb(75 85 99)', // gray-600
-      },
-      accent: {
-        background: 'rgb(22 163 74)', // green-600
-        backgroundHover: 'rgb(21 128 61)', // green-700
-        text: 'rgb(255 255 255)', // white
-        border: 'rgb(22 163 74)', // green-600
-        borderHover: 'rgb(21 128 61)', // green-700
-      },
-    },
-    chat: {
-      user: {
-        background: 'rgb(37 99 235)', // blue-600
-        text: 'rgb(255 255 255)', // white
-      },
-      assistant: {
-        background: 'rgb(55 65 81)', // gray-700
-        text: 'rgb(243 244 246)', // gray-100
-      },
-      system: {
-        background: 'rgba(180, 83, 9, 0.3)', // yellow-900/30
-        text: 'rgb(254 240 138)', // yellow-200
-        border: 'rgba(217, 119, 6, 0.3)', // yellow-600/30
-      },
-    },
-    pills: {
-      inactive: {
-        background: 'rgba(55, 65, 81, 0.5)', // gray-700/50
-        border: 'rgba(75, 85, 99, 0.3)', // gray-600/30
-        text: 'rgb(209 213 219)', // gray-300
-        dot: 'rgb(196 181 253)', // purple-400
-        hover: {
-          background: 'rgba(75, 85, 99, 0.6)', // gray-600/60
-          border: 'rgba(107, 114, 128, 0.5)', // gray-500/50
-          text: 'rgb(255 255 255)', // white
-        },
-      },
-      active: {
-        background: 'rgba(37, 99, 235, 0.2)', // blue-600/20
-        border: 'rgba(59, 130, 246, 0.5)', // blue-500/50
-        text: 'rgb(147 197 253)', // blue-300
-        dot: 'rgb(96 165 250)', // blue-400
-        hover: {
-          background: 'rgba(37, 99, 235, 0.3)', // blue-600/30
-          border: 'rgba(59, 130, 246, 0.7)', // blue-500/70
-        },
-      },
-    },
-  },
-
   light: {
     background: {
       primary: 'rgb(247 247 245)', // cream/beige - main content area (Overview style)
@@ -299,7 +205,7 @@ export const themes: Record<ThemeName, ColorPalette> = {
 
 // Helper function to get current theme
 export const getCurrentTheme = (
-  themeName: ThemeName = 'dark'
+  themeName: ThemeName = 'light'
 ): ColorPalette => {
   return themes[themeName]
 }

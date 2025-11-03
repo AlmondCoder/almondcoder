@@ -19,9 +19,6 @@ interface FontPreferences {
 
 interface ThemeContextType {
   theme: ColorPalette
-  themeName: ThemeName
-  setTheme: (themeName: ThemeName) => void
-  availableThemes: ThemeName[]
   fontPreferences: FontPreferences
   setFontSize: (size: FontSize) => void
   setFontFamily: (family: FontFamily) => void
@@ -33,17 +30,12 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 interface ThemeProviderProps {
   children: ReactNode
-  defaultTheme?: ThemeName
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   children,
-  defaultTheme = 'light',
 }) => {
-  const [themeName, setThemeName] = useState<ThemeName>(defaultTheme)
-  const [theme, setTheme] = useState<ColorPalette>(
-    getCurrentTheme(defaultTheme)
-  )
+  const [theme] = useState<ColorPalette>(getCurrentTheme('light'))
   const [fontPreferences, setFontPreferences] = useState<FontPreferences>({
     size: 'base',
     family: 'inter',
@@ -55,16 +47,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   // Track if we're currently loading settings to prevent infinite loop
   const isLoadingSettings = useRef(false)
 
-  const availableThemes: ThemeName[] = ['dark', 'light', 'midnight', 'ocean']
-
-  // Load theme and font preferences from localStorage on mount
+  // Load font preferences from localStorage on mount
   useEffect(() => {
-    const savedTheme = localStorage.getItem('almondcoder-theme') as ThemeName
-    if (savedTheme && availableThemes.includes(savedTheme)) {
-      setThemeName(savedTheme)
-      setTheme(getCurrentTheme(savedTheme))
-    }
-
     const savedFontPreferences = localStorage.getItem(
       'almondcoder-font-preferences'
     )
@@ -77,19 +61,6 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
       }
     }
   }, [])
-
-  // Save theme to localStorage and project settings when changed
-  useEffect(() => {
-    // Don't save if we're currently loading settings
-    if (isLoadingSettings.current) return
-
-    localStorage.setItem('almondcoder-theme', themeName)
-
-    // Also save to project settings if a project is open
-    if (currentProjectPath) {
-      saveToProjectSettings()
-    }
-  }, [themeName, currentProjectPath])
 
   // Save font preferences to localStorage and project settings when changed
   useEffect(() => {
@@ -114,7 +85,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     try {
       await window.App.saveProjectSettings(currentProjectPath, {
         theme: {
-          name: themeName,
+          name: 'light',
           fontPreferences: {
             size: fontPreferences.size,
             family: fontPreferences.family,
@@ -135,13 +106,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
       const settings = await window.App.getProjectSettings(projectPath)
 
       if (settings?.theme) {
-        const { name, fontPreferences: projectFontPrefs } = settings.theme
-
-        // Apply theme name if valid
-        if (name && availableThemes.includes(name as ThemeName)) {
-          setThemeName(name as ThemeName)
-          setTheme(getCurrentTheme(name as ThemeName))
-        }
+        const { fontPreferences: projectFontPrefs } = settings.theme
 
         // Apply font preferences if available
         if (projectFontPrefs) {
@@ -371,11 +336,6 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
     document.body.style.fontFamily = fontFamilyMap[fontPreferences.family]
   }, [theme, fontPreferences])
 
-  const handleSetTheme = (newThemeName: ThemeName) => {
-    setThemeName(newThemeName)
-    setTheme(getCurrentTheme(newThemeName))
-  }
-
   const handleSetFontSize = (size: FontSize) => {
     setFontPreferences(prev => ({ ...prev, size }))
   }
@@ -386,9 +346,6 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
 
   const contextValue: ThemeContextType = {
     theme,
-    themeName,
-    setTheme: handleSetTheme,
-    availableThemes,
     fontPreferences,
     setFontSize: handleSetFontSize,
     setFontFamily: handleSetFontFamily,

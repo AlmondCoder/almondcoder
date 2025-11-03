@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { File, Plus, Minus, FileText } from 'lucide-react'
+import { File, Plus, Minus, FileText } from '@phosphor-icons/react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 
 interface DiffViewProps {

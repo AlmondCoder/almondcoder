@@ -1,25 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import {
-  ClipboardList,
+  ClipboardText,
   Play,
-  ChevronDown,
+  CaretDown,
   ArrowUp,
-  FileEdit,
+  FileText,
   BookOpen,
   Terminal,
-  ListTodo,
-  Search,
+  ListChecks,
+  MagnifyingGlass,
   FolderOpen,
   Globe,
   CheckSquare,
   Notebook,
-  Zap,
+  Lightning,
   XCircle,
   Wrench,
   Plus,
   X,
-} from 'lucide-react'
+} from '@phosphor-icons/react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import { PromptInput } from './PromptInput'
 import type {
@@ -133,17 +133,17 @@ interface ChatMessage {
 // Helper function to get tool icon component
 const getToolIcon = (toolName: string) => {
   const iconMap: Record<string, any> = {
-    Write: FileEdit,
-    Edit: FileEdit,
+    Write: FileText,
+    Edit: FileText,
     Read: BookOpen,
     Bash: Terminal,
-    Task: ListTodo,
-    Grep: Search,
+    Task: ListChecks,
+    Grep: MagnifyingGlass,
     Glob: FolderOpen,
     WebFetch: Globe,
     TodoWrite: CheckSquare,
     NotebookEdit: Notebook,
-    SlashCommand: Zap,
+    SlashCommand: Lightning,
     BashOutput: Terminal,
     KillShell: XCircle,
   }
@@ -192,9 +192,9 @@ export function ConversationView({
   loadAndProcessPromptHistory,
   onTokenUsageUpdate,
 }: ConversationViewProps) {
-  const { theme, themeName } = useTheme()
+  const { theme } = useTheme()
   const themeClasses = createThemeClasses(theme)
-  const isLightTheme = themeName === 'light'
+  const isLightTheme = true
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isLoadingConversation, setIsLoadingConversation] = useState(false)

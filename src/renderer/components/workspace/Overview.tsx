@@ -13,7 +13,7 @@ import {
   applyEdgeChanges,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { X, Edit3, ChevronLeft, ChevronRight, ChevronDown, CheckCircle, AlertCircle, GitBranch } from 'lucide-react'
+import { X, NotePencil, CaretLeft, CaretRight, CaretDown, CheckCircle, WarningCircle, GitBranch } from '@phosphor-icons/react'
 
 const { App } = window
 
@@ -716,7 +716,7 @@ export function Overview({
                   }}
                 >
                   {childBranches.length > 0 && (
-                    isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+                    isExpanded ? <CaretDown size={14} /> : <CaretRight size={14} />
                   )}
                   <GitBranch size={14} />
                   <span className="text-sm font-medium flex-1 truncate">{parentBranch}</span>
@@ -866,7 +866,7 @@ export function Overview({
                     e.currentTarget.style.backgroundColor = 'transparent'
                   }}
                 >
-                  <Edit3 size={18} />
+                  <NotePencil size={18} />
                   Discard Changes
                 </button>
               </div>
@@ -913,7 +913,7 @@ export function Overview({
                       }}
                       disabled={getTotalConflicts() === 0}
                     >
-                      <ChevronLeft size={18} />
+                      <CaretLeft size={18} />
                     </button>
                     <button
                       className="p-2 rounded transition-colors"
@@ -924,7 +924,7 @@ export function Overview({
                       }}
                       disabled={getTotalConflicts() === 0}
                     >
-                      <ChevronRight size={18} />
+                      <CaretRight size={18} />
                     </button>
                   </div>
                 </div>
@@ -994,7 +994,7 @@ export function Overview({
                           {fileResolved ? (
                             <CheckCircle size={16} style={{ color: theme.status.success }} />
                           ) : (
-                            <AlertCircle size={16} style={{ color: theme.status.warning }} />
+                            <WarningCircle size={16} style={{ color: theme.status.warning }} />
                           )}
                           <span className="text-sm truncate">{fileConflict.file}</span>
                         </div>

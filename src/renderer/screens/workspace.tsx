@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { MessagesSquare, GitMerge, User } from 'lucide-react'
+import { ChatsTeardropIcon, GitMerge, User } from '@phosphor-icons/react'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
 import { Overview } from '../components/workspace/Overview'
 import { Prompts } from '../components/workspace/Prompts'
@@ -40,7 +40,7 @@ export function WorkspaceScreen() {
   const [activeSection, setActiveSection] = useState('prompts')
 
   const topMenuItems = [
-    { icon: MessagesSquare, label: 'Prompts', key: 'prompts' },
+    { icon: ChatsTeardropIcon, label: 'Prompts', key: 'prompts' },
     { icon: GitMerge, label: 'Merge', key: 'merge' },
   ]
 
@@ -88,11 +88,9 @@ export function WorkspaceScreen() {
               title={item.label}
             >
               <item.icon
-                className={`w-6 h-6 transition-colors duration-200 ${
-                  activeSection === item.key
-                    ? `${themeClasses.bgBlack} fill-black`
-                    : `${themeClasses.textSecondary}`
-                }`}
+                className={`w-6 h-6 transition-colors duration-20`}
+                color={themeClasses.textPrimary}
+                weight={activeSection === item.key ? 'fill' : 'regular'}
               />
               {/* Tooltip on hover */}
               <span
@@ -131,8 +129,6 @@ export function WorkspaceScreen() {
           ))}
         </div>
       </div>
-
-      {/* Main content area */}
       <div className="flex-1 overflow-hidden">{renderContent()}</div>
     </div>
   )

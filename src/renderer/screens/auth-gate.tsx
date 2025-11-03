@@ -1,4 +1,4 @@
-import { AlertCircle, ExternalLink, RefreshCw } from 'lucide-react'
+import { WarningCircle, ArrowSquareOut, ArrowsClockwise } from '@phosphor-icons/react'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
@@ -92,7 +92,7 @@ export function AuthGateScreen() {
       >
         <div className="text-center">
           <div className="flex justify-center mb-4">
-            <RefreshCw
+            <ArrowsClockwise
               className={`w-12 h-12 ${themeClasses.textAccent} animate-spin`}
             />
           </div>

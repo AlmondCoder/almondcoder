@@ -1,22 +1,14 @@
 import { useState } from 'react'
-import { Palette, Type, Monitor, Key } from 'lucide-react'
+import { TextAa, Monitor, Key } from '@phosphor-icons/react'
 import {
   useTheme,
   createThemeClasses,
   type FontSize,
   type FontFamily,
 } from '../../theme/ThemeContext'
-import type { ThemeName } from '../../theme/colors'
 import { ProviderTabs } from '../auth/ProviderTabs'
 
-type SettingsSection = 'theme' | 'appearance' | 'general' | 'authentication'
-
-const themeDisplayNames: Record<ThemeName, string> = {
-  dark: 'Dark',
-  light: 'Light',
-  midnight: 'Midnight',
-  ocean: 'Ocean',
-}
+type SettingsSection = 'appearance' | 'general' | 'authentication'
 
 const fontSizeDisplayNames: Record<FontSize, string> = {
   xs: 'Extra Small',
@@ -37,67 +29,18 @@ const fontFamilyDisplayNames: Record<FontFamily, string> = {
 export function Settings() {
   const {
     theme,
-    themeName,
-    setTheme,
-    availableThemes,
     fontPreferences,
     setFontSize,
     setFontFamily,
   } = useTheme()
   const themeClasses = createThemeClasses(theme)
-  const [activeSection, setActiveSection] = useState<SettingsSection>('theme')
+  const [activeSection, setActiveSection] = useState<SettingsSection>('appearance')
 
   const sidebarItems = [
-    { id: 'theme' as const, label: 'Theme', icon: Palette },
-    { id: 'appearance' as const, label: 'Appearance', icon: Type },
+    { id: 'appearance' as const, label: 'Appearance', icon: TextAa },
     { id: 'authentication' as const, label: 'Authentication', icon: Key },
     { id: 'general' as const, label: 'General', icon: Monitor },
   ]
-
-  const renderThemeSection = () => (
-    <div className="space-y-6">
-      <div>
-        <h3
-          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
-        >
-          Color Theme
-        </h3>
-        <div className="grid grid-cols-2 gap-3">
-          {availableThemes.map(themeOption => (
-            <button
-              className={`p-4 rounded-lg border transition-all ${
-                themeName === themeOption
-                  ? `${themeClasses.borderFocus} ${themeClasses.bgTertiary}`
-                  : `${themeClasses.borderSecondary} ${themeClasses.bgCard} hover:${themeClasses.bgTertiary}`
-              }`}
-              key={themeOption}
-              onClick={() => setTheme(themeOption)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="text-left">
-                  <div className={`font-medium ${themeClasses.textPrimary}`}>
-                    {themeDisplayNames[themeOption]}
-                  </div>
-                  <div className={`text-sm ${themeClasses.textSecondary}`}>
-                    {themeOption === 'light' && 'Clean and bright'}
-                    {themeOption === 'dark' && 'Classic dark theme'}
-                    {themeOption === 'midnight' && 'Deep blue theme'}
-                    {themeOption === 'ocean' && 'Teal aqua theme'}
-                  </div>
-                </div>
-                {themeName === themeOption && (
-                  <div
-                    className={`w-4 h-4 rounded-full ${themeClasses.textAccent}`}
-                    style={{ backgroundColor: 'currentColor' }}
-                  />
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
 
   const renderAppearanceSection = () => (
     <div className="space-y-6">
@@ -226,8 +169,6 @@ export function Settings() {
 
   const renderContent = () => {
     switch (activeSection) {
-      case 'theme':
-        return renderThemeSection()
       case 'appearance':
         return renderAppearanceSection()
       case 'authentication':
@@ -235,7 +176,7 @@ export function Settings() {
       case 'general':
         return renderGeneralSection()
       default:
-        return renderThemeSection()
+        return renderAppearanceSection()
     }
   }
 

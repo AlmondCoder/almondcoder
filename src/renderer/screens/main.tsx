@@ -1,4 +1,4 @@
-import { Folder, GitBranch } from 'lucide-react'
+import { Folder, GitBranch } from '@phosphor-icons/react'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CloneRepositoryModal } from '../components/ui/clone-repository-modal'

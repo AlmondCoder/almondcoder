@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash, PencilSimple } from '@phosphor-icons/react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import type { PromptAgent } from '../../../shared/types'
 
@@ -10,9 +10,9 @@ interface AgentViewProps {
 }
 
 export function AgentView({ agents, setAgents, triggerNewAgent }: AgentViewProps) {
-  const { theme, themeName } = useTheme()
+  const { theme } = useTheme()
   const themeClasses = createThemeClasses(theme)
-  const isLightTheme = themeName === 'light'
+  const isLightTheme = true
 
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<PromptAgent | null>(null)
@@ -136,7 +136,7 @@ export function AgentView({ agents, setAgents, triggerNewAgent }: AgentViewProps
                     className={`p-1 rounded hover:${themeClasses.bgInput} transition-colors`}
                     onClick={handleCancelNewAgent}
                   >
-                    <Trash2 className={`w-4 h-4 ${themeClasses.textSecondary}`} />
+                    <Trash className={`w-4 h-4 ${themeClasses.textSecondary}`} />
                   </button>
                 </div>
               </div>
@@ -200,7 +200,7 @@ export function AgentView({ agents, setAgents, triggerNewAgent }: AgentViewProps
                         className={`p-1 rounded hover:${themeClasses.bgInput} transition-colors`}
                         onClick={() => handleDeleteAgent(agent.id)}
                       >
-                        <Trash2 className={`w-4 h-4 ${themeClasses.textSecondary}`} />
+                        <Trash className={`w-4 h-4 ${themeClasses.textSecondary}`} />
                       </button>
                     </div>
                   </div>
@@ -239,7 +239,7 @@ export function AgentView({ agents, setAgents, triggerNewAgent }: AgentViewProps
                       className={`p-1 rounded hover:${themeClasses.bgInput} transition-colors flex-shrink-0 ml-2`}
                       onClick={() => handleStartEdit(agent)}
                     >
-                      <Pencil className={`w-4 h-4 ${themeClasses.textSecondary}`} />
+                      <PencilSimple className={`w-4 h-4 ${themeClasses.textSecondary}`} />
                     </button>
                   </div>
 

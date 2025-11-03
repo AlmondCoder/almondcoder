@@ -1,6 +1,6 @@
 import type React from 'react'
 import { useState } from 'react'
-import { GitBranch, Loader } from 'lucide-react'
+import { GitBranch, CircleNotch } from '@phosphor-icons/react'
 import { Modal } from './modal'
 
 interface CloneRepositoryModalProps {
@@ -88,7 +88,7 @@ export function CloneRepositoryModal({
           >
             {isLoading ? (
               <>
-                <Loader className="w-4 h-4 animate-spin" />
+                <CircleNotch className="w-4 h-4 animate-spin" />
                 <span>Cloning...</span>
               </>
             ) : (

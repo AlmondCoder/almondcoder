@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import {
-  MessageSquare,
-  GitCompare,
+  ChatCircle,
+  GitDiff,
   GitBranch,
   Plus,
-  Grid3x3,
+  GridFour,
   Info,
   Terminal,
   Keyboard,
-} from 'lucide-react'
+} from '@phosphor-icons/react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import { AgentView } from './AgentView'
 import { ConversationView } from './ConversationView'
@@ -33,9 +33,9 @@ interface PromptsProps {
 }
 
 export function Prompts({ projectContext }: PromptsProps) {
-  const { theme, themeName } = useTheme()
+  const { theme } = useTheme()
   const themeClasses = createThemeClasses(theme)
-  const isLightTheme = themeName === 'light'
+  const isLightTheme = true
 
   const [promptHistory, setPromptHistory] = useState<
     EnhancedPromptHistoryItem[]
@@ -504,7 +504,7 @@ export function Prompts({ projectContext }: PromptsProps) {
             }}
           >
             <div className="flex items-center gap-2">
-              <Grid3x3
+              <GridFour
                 className={`w-4 h-4 flex-shrink-0 ${viewMode === 'agents' ? themeClasses.textSecondary : themeClasses.textTertiary}`}
               />
               <span
@@ -822,7 +822,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                   }}
                   title="Conversation View"
                 >
-                  <MessageSquare className="w-4 h-4" />
+                  <ChatCircle className="w-4 h-4" />
                 </button>
                 <div
                   className="w-px h-6"
@@ -843,7 +843,7 @@ export function Prompts({ projectContext }: PromptsProps) {
                   }}
                   title="Code Difference View"
                 >
-                  <GitCompare className="w-4 h-4" />
+                  <GitDiff className="w-4 h-4" />
                 </button>
               </div>
             </div>
