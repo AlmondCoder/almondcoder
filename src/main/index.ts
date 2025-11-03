@@ -20,6 +20,7 @@ import {
 import { homedir } from 'node:os'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
+import * as lockfile from 'proper-lockfile'
 
 import { makeAppWithSingleInstanceLock } from 'lib/electron-app/factories/app/instance'
 import { makeAppSetup } from 'lib/electron-app/factories/app/setup'
@@ -578,6 +579,8 @@ ipcMain.handle('read-conversation-log', async (event, filePath: string) => {
 ipcMain.handle(
   'append-to-conversation-log',
   async (event, filePath: string, logEntry: any) => {
+    let release: (() => Promise<void>) | null = null
+
     try {
       // Expand tilde in file path
       const expandedFilePath = filePath.startsWith('~')
@@ -591,27 +594,43 @@ ipcMain.handle(
         console.log('Created directory:', dirPath)
       }
 
+      // Create file if it doesn't exist (required for locking)
+      if (!existsSync(expandedFilePath)) {
+        writeFileSync(expandedFilePath, JSON.stringify([], null, 2))
+        console.log('Creating new conversation log file:', expandedFilePath)
+      }
+
+      // 🔒 CRITICAL FIX: Acquire exclusive lock to prevent race conditions
+      // This ensures atomic read-modify-write operations when multiple prompts
+      // execute concurrently and try to write to the same file
+      console.log('🔒 Attempting to acquire lock for:', expandedFilePath)
+      release = await lockfile.lock(expandedFilePath, {
+        retries: {
+          retries: 10,        // Retry up to 10 times
+          minTimeout: 50,     // Start with 50ms delay
+          maxTimeout: 1000,   // Max 1 second delay between retries
+        },
+        stale: 10000,         // Consider lock stale after 10 seconds
+      })
+      console.log('✅ Lock acquired for:', expandedFilePath)
+
       // Read existing file content or create empty array
       let logEntries: any[] = []
 
-      if (existsSync(expandedFilePath)) {
-        try {
-          const fileContent = readFileSync(expandedFilePath, 'utf8')
-          logEntries = JSON.parse(fileContent)
+      try {
+        const fileContent = readFileSync(expandedFilePath, 'utf8')
+        logEntries = JSON.parse(fileContent)
 
-          if (!Array.isArray(logEntries)) {
-            console.warn('Conversation log file is not an array, recreating')
-            logEntries = []
-          }
-        } catch (parseError) {
-          console.error(
-            'Error parsing conversation log file, recreating:',
-            parseError
-          )
+        if (!Array.isArray(logEntries)) {
+          console.warn('Conversation log file is not an array, recreating')
           logEntries = []
         }
-      } else {
-        console.log('Creating new conversation log file:', expandedFilePath)
+      } catch (parseError) {
+        console.error(
+          'Error parsing conversation log file, recreating:',
+          parseError
+        )
+        logEntries = []
       }
 
       // Append new entry
@@ -624,9 +643,24 @@ ipcMain.handle(
         expandedFilePath
       )
 
+      // Release lock
+      await release()
+      console.log('🔓 Lock released for:', expandedFilePath)
+
       return { success: true }
     } catch (error: any) {
       console.error('Error appending to conversation log:', error)
+
+      // Ensure lock is released even on error
+      if (release) {
+        try {
+          await release()
+          console.log('🔓 Lock released (error path) for:', filePath)
+        } catch (releaseError) {
+          console.error('Error releasing lock:', releaseError)
+        }
+      }
+
       return {
         success: false,
         error: error.message,

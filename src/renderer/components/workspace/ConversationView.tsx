@@ -39,6 +39,17 @@ import {
   oneLight,
 } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { detectLanguageFromPath } from '../../utils/languageDetection'
+import {
+  executeConversation,
+  type ProjectContext as ExecutorProjectContext,
+  type ExecutionOptions,
+} from '../../services/conversationExecutor'
+import {
+  convertSDKMessageToChat,
+  Response,
+  createMessageHandler,
+  type MessageHandlerConfig,
+} from '../../services/conversationMessageHandler'
 
 interface ProjectContext {
   projectPath: string
@@ -117,11 +128,7 @@ interface ChatMessage {
   newPrompt?: string // For cancelled permissions with override
 }
 
-enum Response {
-  user = 'user',
-  system = 'system',
-  ai = 'ai',
-}
+// Response enum is now imported from conversationMessageHandler
 
 // Helper function to get tool icon component
 const getToolIcon = (toolName: string) => {
@@ -706,12 +713,12 @@ export function ConversationView({
     return finalBranch
   }
 
+  // Helper to write to conversation log (simple wrapper around module function)
   const updateConversationFile = async (
     file: string,
     jsonConversation: any,
     from: Response
   ) => {
-    // Append to file this jsonConversation, with timestamp, and from
     try {
       const logEntry = {
         from,
@@ -719,92 +726,9 @@ export function ConversationView({
         data: jsonConversation,
       }
       await window.App.appendToConversationLog(file, logEntry)
-      console.log(
-        '✅ Appended conversation entry to file:',
-        file,
-        'from:',
-        from
-      )
     } catch (error) {
       console.error('❌ Error appending to conversation file:', error)
     }
-  }
-
-  // Convert SDK message to ChatMessage format
-  const convertSDKMessageToChatMessage = (sdkMessage: any): ChatMessage[] => {
-    const messages: ChatMessage[] = []
-    const timestamp = new Date()
-
-    switch (sdkMessage.type) {
-      case 'system':
-        if (sdkMessage.subtype === 'init') {
-          messages.push({
-            id: `init-${sdkMessage.session_id || Date.now()}`,
-            type: 'init',
-            timestamp,
-            sessionId: sdkMessage.session_id,
-            model: sdkMessage.model,
-            cwd: sdkMessage.cwd,
-          })
-        }
-        break
-
-      case 'assistant':
-        // Extract text and tool_use blocks
-        sdkMessage.message.content.forEach((block: any, idx: number) => {
-          if (block.type === 'text' && block.text) {
-            // ✅ FIX: Use message ID + index for uniqueness
-            messages.push({
-              id: `text-${sdkMessage.message.id || Date.now()}-${idx}`,
-              type: 'text',
-              text: block.text,
-              timestamp,
-            })
-          } else if (block.type === 'tool_use') {
-            // ✅ FIX: Use SDK's unique tool_use ID instead of timestamp
-            messages.push({
-              id: `tool-use-${block.id}`,
-              type: 'tool_use',
-              toolName: block.name,
-              toolInput: block.input,
-              toolUseId: block.id,
-              timestamp,
-            })
-          }
-        })
-        break
-
-      case 'user':
-        // Extract tool results
-        sdkMessage.message.content.forEach((block: any, idx: number) => {
-          if (block.type === 'tool_result') {
-            // ✅ FIX: Use tool_use_id for uniqueness (links to the tool that was executed)
-            messages.push({
-              id: `tool-result-${block.tool_use_id}`,
-              type: 'tool_result',
-              toolResult: block.content,
-              toolUseId: block.tool_use_id,
-              isError: block.is_error || false,
-              timestamp,
-            })
-          }
-        })
-        break
-
-      case 'result':
-        // ✅ FIX: Use session_id or timestamp + random for uniqueness
-        messages.push({
-          id: `result-${sdkMessage.session_id || Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          type: 'result',
-          duration: sdkMessage.duration_ms,
-          cost: sdkMessage.total_cost_usd,
-          numTurns: sdkMessage.num_turns,
-          timestamp,
-        })
-        break
-    }
-
-    return messages
   }
 
   // ============================================================================
@@ -1152,195 +1076,73 @@ export function ConversationView({
       // ✅ State managed by main process - no need to set here
       // Main process will broadcast 'running' status when SDK query starts
 
-      // Setup message handler for Claude SDK output
-      console.log('📡 Setting up message handler for Claude SDK...')
-      console.log('📡 Handler will process messages for promptId:', promptId)
+      // ============================================================================
+      // Setup Message Handler using modular architecture
+      // ============================================================================
+      // Uses createMessageHandler from conversationMessageHandler module
+      // This encapsulates all message routing, filtering, and file writing logic
 
-      const handleClaudeMessage = async (data: {
-        type: string
-        data: string
-        promptId?: string
-      }) => {
-        // ============================================================================
-        // CRITICAL FIX: Filter messages by promptId to prevent session ID contamination
-        // ============================================================================
-        // LOGIC: Each handler receives ALL messages on the 'command-output' channel.
-        // If we don't filter, this handler will process messages from OTHER conversations,
-        // causing session ID contamination (lines 1072, 1092, 1108).
-        // By checking if the message's promptId matches THIS conversation's promptId,
-        // we ensure only the correct handler processes each message.
-        if (data.promptId && data.promptId !== promptId) {
-          console.log(
-            `⏭️ [FILTER] Ignoring message from different conversation:`,
-            `received: ${data.promptId}, expected: ${promptId}`
-          )
-          return // Exit early - prevents session ID contamination
-        }
+      const messageHandlerConfig: MessageHandlerConfig = {
+        promptId,
+        conversationLogPath,
+        conversation,
+        projectPath: projectContext.projectPath,
 
-        console.log(
-          '✅ [FILTER] Message belongs to this conversation, processing...'
-        )
-        console.log('🔔 handleClaudeMessage called!', data)
-        try {
-          console.log('🔍 Raw data received:', data)
-          const sdkMessage = JSON.parse(data.data)
-          console.log(
-            '📨 Full SDK message:',
-            JSON.stringify(sdkMessage, null, 2)
-          )
-
-          // Always log to conversation file (for all conversations, even background ones)
-          await updateConversationFile(
-            conversationLogPath,
-            { content: sdkMessage },
-            Response.ai
-          )
-
-          // Only update UI in real-time if this is the selected conversation
-          // This enables parallel conversations - background ones save to file only
-          // Use ref to avoid stale closure when user switches conversations
-          const isSelectedConversation =
-            selectedConversationRef.current.promptId === promptId
-          console.log(
-            '🔍 Is this the selected conversation?',
-            isSelectedConversation,
-            'selectedConversation.promptId:',
-            selectedConversationRef.current.promptId,
-            'current promptId:',
-            promptId
-          )
-
-          if (isSelectedConversation) {
-            const newMessages = convertSDKMessageToChatMessage(sdkMessage)
-            setChatMessages(prev => {
-              // Double-check still selected before committing update
-              if (selectedConversationRef.current.promptId === promptId) {
-                return [...prev, ...newMessages]
-              }
-              return prev // Don't update if conversation changed
-            })
-            console.log('✅ Updated chat messages in UI (real-time)')
-          } else {
-            console.log(
-              '⏭️ Skipping real-time UI update - conversation running in background'
-            )
-            console.log(
-              '   Messages are saved to file and will load when user switches to this conversation'
-            )
-          }
-
-          // Capture session ID for resumption
-          if (sdkMessage.session_id) {
-            console.log('🔑 Captured session ID:', sdkMessage.session_id)
-
-            // Update selectedConversation for resumption
-            setSelectedConversation(prev => {
-              if (prev.promptId === promptId) {
-                console.log('✅ Updated selectedConversation with session ID')
-                return { ...prev, aiSessionId: sdkMessage.session_id }
-              }
-              return prev
-            })
-
-            // Persist session ID to database for resumption
-            try {
-              // Reload prompt history to get latest data
-              const currentHistory = await window.App.getEnhancedPromptHistory(
-                projectContext?.projectPath || conversation.projectPath
-              )
-              const prompt = currentHistory.find((p: any) => p.id === promptId)
-
-              if (prompt) {
-                await window.App.updateEnhancedPrompt({
-                  ...prompt,
-                  startExecutionTime: new Date(prompt.startExecutionTime),
-                  createdAt: new Date(prompt.createdAt),
-                  updatedAt: new Date(),
-                  aiSessionId: sdkMessage.session_id,
-                })
-                console.log(
-                  '✅ Persisted session ID to database:',
-                  sdkMessage.session_id
-                )
-              } else {
-                console.warn(
-                  '⚠️  Could not find prompt in database to update session ID:',
-                  promptId
-                )
-              }
-            } catch (error) {
-              console.error('❌ Failed to persist session ID:', error)
+        // Callback: Update UI with new messages (for selected conversation only)
+        onMessage: (messages) => {
+          setChatMessages(prev => {
+            // Double-check still selected before committing update
+            if (selectedConversationRef.current.promptId === promptId) {
+              return [...prev, ...messages]
             }
+            return prev // Don't update if conversation changed
+          })
+        },
 
-            // Update selected conversation with session ID (only if still selected)
-            conversation.aiSessionId = sdkMessage.session_id
-          }
+        // Callback: Handle session ID capture
+        onSessionId: (sessionId) => {
+          // Update selectedConversation for resumption
+          setSelectedConversation(prev => {
+            if (prev.promptId === promptId) {
+              return { ...prev, aiSessionId: sessionId }
+            }
+            return prev
+          })
 
-          // Handle completion
-          if (sdkMessage.type === 'result') {
-            console.log(
-              '🏁 Conversation completed with status:',
-              sdkMessage.subtype
-            )
-            // ✅ State update handled by main process
-            // Main process automatically broadcasts 'completed' status
-            console.log('✅ Conversation completed:', promptId)
+          // Update conversation object
+          conversation.aiSessionId = sessionId
+        },
 
-            // Report token usage from result message
-            if (sdkMessage.usage && onTokenUsageUpdate) {
-              const inputTokens = sdkMessage.usage.input_tokens || 0
-              const outputTokens = sdkMessage.usage.output_tokens || 0
-              const totalTokens = inputTokens + outputTokens
-              console.log(
-                '📊 Real-time token usage update:',
-                `Input: ${inputTokens}, Output: ${outputTokens}, Total: ${totalTokens}`
-              )
-              onTokenUsageUpdate({
-                inputTokens,
-                outputTokens,
-                totalTokens,
+        // Callback: Handle completion
+        onComplete: () => {
+          // Refresh prompt history to show updated status
+          if (projectContext?.projectPath) {
+            window.App.getEnhancedPromptHistory(projectContext.projectPath)
+              .then(updatedHistory => {
+                setPromptHistory(
+                  updatedHistory.map((item: any) => ({
+                    ...item,
+                    startExecutionTime: new Date(item.startExecutionTime),
+                    createdAt: new Date(item.createdAt),
+                    updatedAt: new Date(item.updatedAt),
+                  }))
+                )
               })
-            }
-
-            // Update prompt status to 'completed' in the database
-            try {
-              const prompt = promptHistory.find(p => p.id === promptId)
-              if (prompt) {
-                await window.App.updateEnhancedPrompt({
-                  ...prompt,
-                  status: 'completed',
-                  updatedAt: new Date(),
-                })
-                console.log('✅ Updated prompt status to completed:', promptId)
-
-                // Refresh prompt history to show updated status
-                if (projectContext?.projectPath) {
-                  const updatedHistory =
-                    await window.App.getEnhancedPromptHistory(
-                      projectContext.projectPath
-                    )
-                  setPromptHistory(
-                    updatedHistory.map((item: any) => ({
-                      ...item,
-                      startExecutionTime: new Date(item.startExecutionTime),
-                      createdAt: new Date(item.createdAt),
-                      updatedAt: new Date(item.updatedAt),
-                    }))
-                  )
-                  console.log('✅ Refreshed prompt history')
-                }
-              }
-            } catch (error) {
-              console.error('❌ Error updating prompt status:', error)
-            }
-
-            // Play notification sound
-            playNotificationSound()
+              .catch(error => console.error('Error refreshing prompt history:', error))
           }
-        } catch (error) {
-          console.error('❌ Error processing Claude message:', error)
-        }
+
+          // Play notification sound
+          playNotificationSound()
+        },
+
+        // Callback: Report token usage
+        onTokenUsage: onTokenUsageUpdate,
+
+        // State check: Is this the currently selected conversation?
+        isSelectedConversation: () => selectedConversationRef.current.promptId === promptId,
       }
+
+      const handleClaudeMessage = createMessageHandler(messageHandlerConfig)
 
       // Execute Claude SDK with output callback
       console.log('🚀 Starting Claude SDK execution for:', promptId)
