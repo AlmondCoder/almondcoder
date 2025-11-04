@@ -2,8 +2,6 @@ import { useState, useCallback, useEffect } from 'react'
 import { useTheme, createThemeClasses } from '../../theme/ThemeContext'
 import {
   ReactFlow,
-  MiniMap,
-  Controls,
   Background,
   type Node,
   type Edge,
@@ -13,7 +11,16 @@ import {
   applyEdgeChanges,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { X, NotePencil, CaretLeft, CaretRight, CaretDown, CheckCircle, WarningCircle, GitBranch } from '@phosphor-icons/react'
+import {
+  X,
+  NotePencil,
+  CaretLeft,
+  CaretRight,
+  CaretDown,
+  CheckCircle,
+  WarningCircle,
+  GitBranch as GitBranchIcon,
+} from '@phosphor-icons/react'
 
 const { App } = window
 
@@ -100,6 +107,97 @@ const checkNodesOverlap = (node1: Node, node2: Node): boolean => {
   )
 }
 
+const BranchNodeLabel = ({
+  branch,
+  isParentBranch,
+  promptText,
+}: {
+  branch: GitBranch
+  isParentBranch: boolean
+  promptText?: string
+}) => {
+  if (isParentBranch) {
+    // Parent branch: Simple flat design
+    return (
+      <div style={{ textAlign: 'left' }}>
+        <div
+          style={{
+            fontSize: '13px',
+            fontWeight: '600',
+            color: '#1a1a1a',
+            width: '100%',
+          }}
+        >
+          {branch.name}
+        </div>
+      </div>
+    )
+  }
+
+  // Child branch (almondcoder/): Nested card design
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        margin: '-10px',
+      }}
+    >
+      {/* Header section with branch name */}
+      <div
+        style={{
+          backgroundColor: 'rgb(229, 231, 235)',
+          padding: '8px 12px',
+          borderTopLeftRadius: '8px',
+          borderTopRightRadius: '8px',
+          borderBottom: '1px solid rgb(209, 213, 219)',
+          width: '116%',
+        }}
+      >
+        <div
+          style={{
+            fontSize: '8px',
+            fontWeight: '500',
+            color: '#4b5563',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {branch.name.substring(12)}
+        </div>
+      </div>
+
+      {/* Content section with commit details */}
+      <div
+        style={{
+          backgroundColor: '#FFFFFF',
+          padding: '4px',
+          borderBottomLeftRadius: '8px',
+          borderBottomRightRadius: '8px',
+          gap: '6px',
+          minHeight: 'fit-content',
+        }}
+      >
+        <div
+          style={{
+            fontSize: '8px',
+            color: '#1a1a1a',
+            lineHeight: '1.2',
+            fontWeight: '400',
+            width: '100%',
+            minHeight: 'fit-content',
+          }}
+        >
+          {promptText || branch.subject}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function Overview({
   projectContext,
 }: {
@@ -120,7 +218,9 @@ export function Overview({
   const [mergeConflicts, setMergeConflicts] = useState<MergeConflict[]>([])
   const [showConflictPanel, setShowConflictPanel] = useState(false)
   const [currentConflictIndex, setCurrentConflictIndex] = useState(0)
-  const [resolutions, setResolutions] = useState<Map<string, ConflictResolution>>(new Map())
+  const [resolutions, setResolutions] = useState<
+    Map<string, ConflictResolution>
+  >(new Map())
   const [mergeContext, setMergeContext] = useState<{
     sourceBranch: string
     targetBranch: string
@@ -130,7 +230,9 @@ export function Overview({
 
   // Sidebar state for hierarchical branch tree
   const [branchTree, setBranchTree] = useState<Record<string, string[]>>({})
-  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set(['main', 'master']))
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(
+    new Set(['main', 'master'])
+  )
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null)
 
   useEffect(() => {
@@ -145,18 +247,29 @@ export function Overview({
       const data = await App.getGitBranchGraph(projectContext.projectPath)
 
       // Get list of branches that have active worktrees (using git directly)
-      const worktreeBranchesResult = await App.getWorktreeBranches(projectContext.projectPath)
+      const worktreeBranchesResult = await App.getWorktreeBranches(
+        projectContext.projectPath
+      )
       console.log('Worktree branches result:', worktreeBranchesResult)
 
       const worktreeBranches = worktreeBranchesResult.success
-        ? new Set(worktreeBranchesResult.branches)
-        : new Set()
+        ? new Set<string>(worktreeBranchesResult.branches)
+        : new Set<string>()
 
       console.log('Worktree branches from git:', Array.from(worktreeBranches))
-      console.log('All git branches:', data.branches.map(b => b.name))
+      console.log(
+        'All git branches:',
+        data.branches.map(b => b.name)
+      )
+
+      // Load prompt history to get original prompt text for each branch
+      const promptHistory = await App.getEnhancedPromptHistory(
+        projectContext.projectPath
+      )
+      const promptMap = new Map(promptHistory.map(p => [p.branch, p.prompt]))
 
       setGitData(data)
-      generateNodesAndEdges(data, worktreeBranches)
+      generateNodesAndEdges(data, worktreeBranches, promptMap)
     } catch (error) {
       console.error('Error loading git data:', error)
     } finally {
@@ -164,7 +277,11 @@ export function Overview({
     }
   }
 
-  const generateNodesAndEdges = (data: GitBranchGraph, worktreeBranches: Set<string>) => {
+  const generateNodesAndEdges = (
+    data: GitBranchGraph,
+    worktreeBranches: Set<string>,
+    promptMap: Map<string, string>
+  ) => {
     const nodePositions = new Map<string, { x: number; y: number }>()
 
     // Filter branches: only show almondcoder/ branches that have worktrees, and all non-almondcoder branches
@@ -202,18 +319,23 @@ export function Overview({
       }
 
       // Light theme node styling
+      // Parent branches (non-almondcoder) get gray background, child branches stay white
+      const isParentBranch = !branch.name.startsWith('almondcoder/')
       const nodeStyle = {
-        background: '#FFFFFF',
+        background: isParentBranch ? 'rgb(210, 210, 208)' : '#FFFFFF',
         color: '#333333',
         border: `1px solid ${selectedBranch === branch.name ? '#3B82F6' : '#E5E5E0'}`,
         borderRadius: '8px',
         fontSize: '12px',
         fontWeight: 'normal',
-        boxShadow: selectedBranch === branch.name
-          ? '0 2px 8px rgba(59, 130, 246, 0.2)'
-          : '0 1px 3px rgba(0, 0, 0, 0.1)',
-        padding: '12px',
+        boxShadow:
+          selectedBranch === branch.name
+            ? '0 2px 8px rgba(59, 130, 246, 0.2)'
+            : '0 1px 3px rgba(0, 0, 0, 0.1)',
+        padding: '10px',
       }
+
+      const promptText = promptMap.get(branch.name)
 
       return {
         id: branch.name,
@@ -221,23 +343,11 @@ export function Overview({
         position,
         data: {
           label: (
-            <div style={{ textAlign: 'left' }}>
-              <div style={{
-                fontSize: '13px',
-                marginBottom: '6px',
-                fontWeight: '600',
-                color: '#1a1a1a'
-              }}>
-                {branch.name}
-              </div>
-              <div style={{ fontSize: '11px', color: '#666666', marginBottom: '4px' }}>
-                {branch.author} • {new Date(branch.date).toLocaleDateString()}
-              </div>
-              <div style={{ fontSize: '10px', color: '#888888', lineHeight: '1.4' }}>
-                {branch.subject.substring(0, 40)}
-                {branch.subject.length > 40 ? '...' : ''}
-              </div>
-            </div>
+            <BranchNodeLabel
+              branch={branch}
+              isParentBranch={isParentBranch}
+              promptText={promptText}
+            />
           ),
         },
         style: nodeStyle,
@@ -260,7 +370,9 @@ export function Overview({
     const tree: Record<string, string[]> = {}
 
     // Get parent branches (non-almondcoder branches)
-    const parentBranches = filteredBranches.filter(b => !b.name.startsWith('almondcoder/'))
+    const parentBranches = filteredBranches.filter(
+      b => !b.name.startsWith('almondcoder/')
+    )
 
     // Initialize tree with empty arrays for each parent
     parentBranches.forEach(parent => {
@@ -268,16 +380,24 @@ export function Overview({
     })
 
     // Assign almondcoder branches to their parent branches
-    const almondcoderBranches = filteredBranches.filter(b => b.name.startsWith('almondcoder/'))
+    const almondcoderBranches = filteredBranches.filter(b =>
+      b.name.startsWith('almondcoder/')
+    )
 
     almondcoderBranches.forEach(almondBranch => {
       // Find the parent by looking at relationships
-      const parentRel = data.relationships.find(rel => rel.target === almondBranch.name)
+      const parentRel = data.relationships.find(
+        rel => rel.target === almondBranch.name
+      )
       if (parentRel && tree[parentRel.source]) {
         tree[parentRel.source].push(almondBranch.name)
       } else {
         // If no relationship found, default to 'main' or 'master'
-        const defaultParent = tree['main'] ? 'main' : tree['master'] ? 'master' : parentBranches[0]?.name
+        const defaultParent = tree.main
+          ? 'main'
+          : tree.master
+            ? 'master'
+            : parentBranches[0]?.name
         if (defaultParent && tree[defaultParent]) {
           tree[defaultParent].push(almondBranch.name)
         }
@@ -359,7 +479,9 @@ export function Overview({
 
     // Validate target branch - should not be an almondcoder/ branch
     if (dropAction.targetNode.id.startsWith('almondcoder/')) {
-      alert('Cannot merge into a worktree branch. Please select a regular branch like main or master.')
+      alert(
+        'Cannot merge into a worktree branch. Please select a regular branch like main or master.'
+      )
       return
     }
 
@@ -476,7 +598,11 @@ export function Overview({
     setDropAction(null)
   }
 
-  const handleConflictResolution = (conflictId: string, resolution: 'current' | 'incoming' | 'both', resolvedContent: string) => {
+  const handleConflictResolution = (
+    conflictId: string,
+    resolution: 'current' | 'incoming' | 'both',
+    resolvedContent: string
+  ) => {
     setResolutions(prev => {
       const newMap = new Map(prev)
       newMap.set(conflictId, { conflictId, resolution, resolvedContent })
@@ -486,7 +612,10 @@ export function Overview({
 
   // Get total number of conflicts across all files
   const getTotalConflicts = () => {
-    return mergeConflicts.reduce((total, file) => total + file.conflicts.length, 0)
+    return mergeConflicts.reduce(
+      (total, file) => total + file.conflicts.length,
+      0
+    )
   }
 
   // Get number of resolved conflicts
@@ -497,13 +626,13 @@ export function Overview({
   // Navigate to previous conflict
   const handlePreviousConflict = () => {
     const total = getTotalConflicts()
-    setCurrentConflictIndex((prev) => (prev - 1 + total) % total)
+    setCurrentConflictIndex(prev => (prev - 1 + total) % total)
   }
 
   // Navigate to next conflict
   const handleNextConflict = () => {
     const total = getTotalConflicts()
-    setCurrentConflictIndex((prev) => (prev + 1) % total)
+    setCurrentConflictIndex(prev => (prev + 1) % total)
   }
 
   // Get current conflict data based on index
@@ -537,7 +666,9 @@ export function Overview({
         let content = fileConflict.fullContent
 
         // Replace each conflict with resolved content (in reverse order to preserve line numbers)
-        const sortedConflicts = [...fileConflict.conflicts].sort((a, b) => b.startLine - a.startLine)
+        const sortedConflicts = [...fileConflict.conflicts].sort(
+          (a, b) => b.startLine - a.startLine
+        )
 
         for (const conflict of sortedConflicts) {
           const resolution = resolutions.get(conflict.id)
@@ -547,13 +678,17 @@ export function Overview({
             const afterConflict = lines.slice(conflict.endLine)
             const resolvedLines = resolution.resolvedContent.split('\n')
 
-            content = [...beforeConflict, ...resolvedLines, ...afterConflict].join('\n')
+            content = [
+              ...beforeConflict,
+              ...resolvedLines,
+              ...afterConflict,
+            ].join('\n')
           }
         }
 
         fileResolutions.push({
           file: fileConflict.file,
-          content
+          content,
         })
       }
 
@@ -648,7 +783,9 @@ export function Overview({
   if (!projectContext) {
     return (
       <div className="p-6 h-full">
-        <h2 className={`text-2xl font-bold mb-4 ${themeClasses.textPrimary}`}>Git Overview</h2>
+        <h2 className={`text-2xl font-bold mb-4 ${themeClasses.textPrimary}`}>
+          Git Overview
+        </h2>
         <p className={themeClasses.textTertiary}>No project selected</p>
       </div>
     )
@@ -657,14 +794,19 @@ export function Overview({
   if (loading) {
     return (
       <div className="p-6 h-full">
-        <h2 className={`text-2xl font-bold mb-4 ${themeClasses.textPrimary}`}>Git Overview</h2>
+        <h2 className={`text-2xl font-bold mb-4 ${themeClasses.textPrimary}`}>
+          Git Overview
+        </h2>
         <p className={themeClasses.textTertiary}>Loading git data...</p>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full" style={{ backgroundColor: theme.background.primary }}>
+    <div
+      className="flex h-full"
+      style={{ backgroundColor: theme.background.primary }}
+    >
       {/* Left Sidebar - Branch Tree */}
       <div
         className="w-1/6 border-r p-4 overflow-y-auto"
@@ -673,7 +815,10 @@ export function Overview({
           borderColor: theme.border.primary,
         }}
       >
-        <h3 className="text-sm font-semibold mb-4" style={{ color: theme.text.primary }}>
+        <h3
+          className="text-sm font-semibold mb-4"
+          style={{ color: theme.text.primary }}
+        >
           Branches
         </h3>
 
@@ -687,11 +832,6 @@ export function Overview({
                 {/* Parent Branch Button */}
                 <button
                   className="w-full flex items-center gap-2 px-3 py-2 rounded transition-all text-left"
-                  style={{
-                    backgroundColor: selectedBranch === parentBranch ? theme.background.card : 'transparent',
-                    border: `1px solid ${selectedBranch === parentBranch ? theme.border.focus : 'transparent'}`,
-                    color: theme.text.primary,
-                  }}
                   onClick={() => {
                     setSelectedBranch(parentBranch)
                     setExpandedParents(prev => {
@@ -704,24 +844,41 @@ export function Overview({
                       return newSet
                     })
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={e => {
                     if (selectedBranch !== parentBranch) {
-                      e.currentTarget.style.backgroundColor = theme.background.card
+                      e.currentTarget.style.backgroundColor =
+                        theme.background.card
                     }
                   }}
-                  onMouseLeave={(e) => {
+                  onMouseLeave={e => {
                     if (selectedBranch !== parentBranch) {
                       e.currentTarget.style.backgroundColor = 'transparent'
                     }
                   }}
+                  style={{
+                    backgroundColor:
+                      selectedBranch === parentBranch
+                        ? theme.background.card
+                        : 'transparent',
+                    border: `1px solid ${selectedBranch === parentBranch ? theme.border.focus : 'transparent'}`,
+                    color: theme.text.primary,
+                  }}
                 >
+                  {childBranches.length > 0 &&
+                    (isExpanded ? (
+                      <CaretDown size={14} />
+                    ) : (
+                      <CaretRight size={14} />
+                    ))}
+                  <GitBranchIcon size={14} />
+                  <span className="text-sm font-medium flex-1 truncate">
+                    {parentBranch}
+                  </span>
                   {childBranches.length > 0 && (
-                    isExpanded ? <CaretDown size={14} /> : <CaretRight size={14} />
-                  )}
-                  <GitBranch size={14} />
-                  <span className="text-sm font-medium flex-1 truncate">{parentBranch}</span>
-                  {childBranches.length > 0 && (
-                    <span className="text-xs" style={{ color: theme.text.muted }}>
+                    <span
+                      className="text-xs"
+                      style={{ color: theme.text.muted }}
+                    >
                       ({childBranches.length})
                     </span>
                   )}
@@ -732,27 +889,34 @@ export function Overview({
                   <div className="ml-6 mt-1 space-y-1">
                     {childBranches.map(childBranch => (
                       <button
-                        key={childBranch}
                         className="w-full flex items-center gap-2 px-3 py-2 rounded transition-all text-left"
+                        key={childBranch}
+                        onClick={() => setSelectedBranch(childBranch)}
+                        onMouseEnter={e => {
+                          if (selectedBranch !== childBranch) {
+                            e.currentTarget.style.backgroundColor =
+                              theme.background.card
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (selectedBranch !== childBranch) {
+                            e.currentTarget.style.backgroundColor =
+                              'transparent'
+                          }
+                        }}
                         style={{
-                          backgroundColor: selectedBranch === childBranch ? theme.background.card : 'transparent',
+                          backgroundColor:
+                            selectedBranch === childBranch
+                              ? theme.background.card
+                              : 'transparent',
                           border: `1px solid ${selectedBranch === childBranch ? theme.border.focus : 'transparent'}`,
                           color: theme.text.secondary,
                         }}
-                        onClick={() => setSelectedBranch(childBranch)}
-                        onMouseEnter={(e) => {
-                          if (selectedBranch !== childBranch) {
-                            e.currentTarget.style.backgroundColor = theme.background.card
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (selectedBranch !== childBranch) {
-                            e.currentTarget.style.backgroundColor = 'transparent'
-                          }
-                        }}
                       >
-                        <GitBranch size={12} />
-                        <span className="text-xs truncate">{childBranch.replace('almondcoder/', '')}</span>
+                        <GitBranchIcon size={12} />
+                        <span className="text-xs truncate">
+                          {childBranch.replace('almondcoder/', '')}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -766,20 +930,29 @@ export function Overview({
       {/* Right Area - ReactFlow Visualization */}
       <div className="w-5/6 p-6 flex flex-col">
         <div className="mb-4">
-          <h2 className="text-2xl font-bold mb-2" style={{ color: theme.text.primary }}>Git Branch Overview</h2>
+          <h2
+            className="text-2xl font-bold mb-2"
+            style={{ color: theme.text.primary }}
+          >
+            Git Branch Overview
+          </h2>
           <p className="text-sm" style={{ color: theme.text.secondary }}>
             Project: {projectContext.projectPath.split('/').pop()} • Current:{' '}
             {gitData?.currentBranch}
           </p>
           <p className="text-xs mt-1" style={{ color: theme.text.muted }}>
-            Drag branches onto each other to merge. Related branches can be merged together.
+            Drag branches onto each other to merge. Related branches can be
+            merged together.
           </p>
         </div>
 
         {/* React Flow Canvas */}
         <div
           className="rounded-lg flex-1 relative overflow-hidden"
-          style={{ backgroundColor: theme.background.primary, border: `1px solid ${theme.border.primary}` }}
+          style={{
+            backgroundColor: theme.background.primary,
+            border: `1px solid ${theme.border.primary}`,
+          }}
         >
           <ReactFlow
             className="rounded"
@@ -792,7 +965,12 @@ export function Overview({
             onNodesChange={onNodesChange}
             style={{ backgroundColor: theme.background.primary }}
           >
-            <Background color={theme.border.primary} gap={16} size={1} variant="dots" />
+            <Background
+              color={theme.border.primary}
+              gap={16}
+              size={1}
+              variant="dots"
+            />
           </ReactFlow>
 
           {/* Merge Dialog */}
@@ -810,13 +988,14 @@ export function Overview({
               <button
                 className="absolute top-4 right-4 p-2 transition-colors rounded-full"
                 onClick={handleCancelMerge}
-                style={{ color: theme.text.secondary }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = theme.background.tertiary
+                onMouseEnter={e => {
+                  e.currentTarget.style.backgroundColor =
+                    theme.background.tertiary
                 }}
-                onMouseLeave={(e) => {
+                onMouseLeave={e => {
                   e.currentTarget.style.backgroundColor = 'transparent'
                 }}
+                style={{ color: theme.text.secondary }}
               >
                 <X size={20} />
               </button>
@@ -828,8 +1007,18 @@ export function Overview({
               >
                 Merge {dropAction.draggedNode.id}
                 <br />
-                <span style={{ color: theme.text.secondary, fontSize: '14px', fontWeight: 'normal' }}>
-                  into {dropAction.targetNode.id === 'main' || dropAction.targetNode.id === 'master' ? 'production' : dropAction.targetNode.id}
+                <span
+                  style={{
+                    color: theme.text.secondary,
+                    fontSize: '14px',
+                    fontWeight: 'normal',
+                  }}
+                >
+                  into{' '}
+                  {dropAction.targetNode.id === 'main' ||
+                  dropAction.targetNode.id === 'master'
+                    ? 'production'
+                    : dropAction.targetNode.id}
                 </span>
               </div>
 
@@ -838,15 +1027,15 @@ export function Overview({
                 <button
                   className="px-4 py-3 text-sm rounded-lg transition-all w-full text-center font-medium"
                   onClick={handleMergeClick}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.backgroundColor = theme.text.secondary
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.backgroundColor = theme.text.primary
+                  }}
                   style={{
                     backgroundColor: theme.text.primary,
                     color: theme.background.card,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = theme.text.secondary
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = theme.text.primary
                   }}
                 >
                   Merge Changes
@@ -854,16 +1043,17 @@ export function Overview({
                 <button
                   className="px-4 py-3 text-sm rounded-lg transition-all w-full text-center flex items-center justify-center gap-2"
                   onClick={handleDiscardChanges}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.backgroundColor =
+                      theme.background.tertiary
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
                   style={{
                     backgroundColor: 'transparent',
                     color: theme.text.secondary,
                     border: `1px solid ${theme.border.primary}`,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = theme.background.tertiary
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent'
                   }}
                 >
                   <NotePencil size={18} />
@@ -880,9 +1070,16 @@ export function Overview({
         <>
           {/* Backdrop */}
           <div
+            aria-label="Close modal"
             className="fixed inset-0 z-40"
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             onClick={handleAbortMerge}
+            onKeyDown={e => {
+              if (e.key === 'Escape') {
+                handleAbortMerge()
+              }
+            }}
+            role="presentation"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
           />
 
           {/* Modal */}
@@ -898,31 +1095,38 @@ export function Overview({
               }}
             >
               {/* Header with all controls */}
-              <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: theme.border.primary }}>
+              <div
+                className="flex items-center justify-between px-6 py-4 border-b"
+                style={{ borderColor: theme.border.primary }}
+              >
                 <div className="flex items-center gap-4">
-                  <h3 className="text-lg font-semibold" style={{ color: theme.text.primary }}>
-                    Merge Conflicts ({currentConflictIndex + 1}/{getTotalConflicts()})
+                  <h3
+                    className="text-lg font-semibold"
+                    style={{ color: theme.text.primary }}
+                  >
+                    Merge Conflicts ({currentConflictIndex + 1}/
+                    {getTotalConflicts()})
                   </h3>
                   <div className="flex gap-1">
                     <button
                       className="p-2 rounded transition-colors"
+                      disabled={getTotalConflicts() === 0}
                       onClick={handlePreviousConflict}
                       style={{
                         backgroundColor: theme.background.tertiary,
-                        color: theme.text.primary
+                        color: theme.text.primary,
                       }}
-                      disabled={getTotalConflicts() === 0}
                     >
                       <CaretLeft size={18} />
                     </button>
                     <button
                       className="p-2 rounded transition-colors"
+                      disabled={getTotalConflicts() === 0}
                       onClick={handleNextConflict}
                       style={{
                         backgroundColor: theme.background.tertiary,
-                        color: theme.text.primary
+                        color: theme.text.primary,
                       }}
-                      disabled={getTotalConflicts() === 0}
                     >
                       <CaretRight size={18} />
                     </button>
@@ -936,20 +1140,30 @@ export function Overview({
                       backgroundColor: theme.background.tertiary,
                       color: theme.text.muted,
                       cursor: 'not-allowed',
-                      opacity: 0.5
+                      opacity: 0.5,
                     }}
                   >
                     Resolve with AI
                   </button>
                   <button
                     className="px-4 py-2 text-sm rounded transition-colors font-medium"
-                    onClick={handleResolveAllConflicts}
                     disabled={getResolvedCount() !== getTotalConflicts()}
+                    onClick={handleResolveAllConflicts}
                     style={{
-                      backgroundColor: getResolvedCount() === getTotalConflicts() ? theme.status.success : theme.background.tertiary,
-                      color: getResolvedCount() === getTotalConflicts() ? theme.text.primary : theme.text.muted,
-                      cursor: getResolvedCount() === getTotalConflicts() ? 'pointer' : 'not-allowed',
-                      opacity: getResolvedCount() === getTotalConflicts() ? 1 : 0.6
+                      backgroundColor:
+                        getResolvedCount() === getTotalConflicts()
+                          ? theme.status.success
+                          : theme.background.tertiary,
+                      color:
+                        getResolvedCount() === getTotalConflicts()
+                          ? theme.text.primary
+                          : theme.text.muted,
+                      cursor:
+                        getResolvedCount() === getTotalConflicts()
+                          ? 'pointer'
+                          : 'not-allowed',
+                      opacity:
+                        getResolvedCount() === getTotalConflicts() ? 1 : 0.6,
                     }}
                   >
                     Merge ({getResolvedCount()}/{getTotalConflicts()})
@@ -967,46 +1181,75 @@ export function Overview({
               {/* Body: Two pane layout */}
               <div className="flex flex-1 overflow-hidden">
                 {/* Left Pane - File List */}
-                <div className="w-64 border-r overflow-y-auto" style={{ borderColor: theme.border.primary, backgroundColor: theme.background.tertiary }}>
+                <div
+                  className="w-64 border-r overflow-y-auto"
+                  style={{
+                    borderColor: theme.border.primary,
+                    backgroundColor: theme.background.tertiary,
+                  }}
+                >
                   <div className="p-4">
-                    {mergeConflicts.map((fileConflict) => {
-                      const fileResolved = fileConflict.conflicts.every(c => resolutions.has(c.id))
+                    {mergeConflicts.map(fileConflict => {
+                      const fileResolved = fileConflict.conflicts.every(c =>
+                        resolutions.has(c.id)
+                      )
+                      const handleFileClick = () => {
+                        // Jump to first conflict in this file
+                        let index = 0
+                        for (const fc of mergeConflicts) {
+                          if (fc.file === fileConflict.file) {
+                            setCurrentConflictIndex(index)
+                            break
+                          }
+                          index += fc.conflicts.length
+                        }
+                      }
                       return (
-                        <div
+                        <button
+                          className="flex items-center gap-2 p-2 rounded cursor-pointer mb-1 transition-colors w-full text-left"
                           key={fileConflict.file}
-                          className="flex items-center gap-2 p-2 rounded cursor-pointer mb-1 transition-colors"
+                          onClick={handleFileClick}
                           style={{
-                            backgroundColor: getCurrentConflict()?.fileConflict.file === fileConflict.file ? theme.background.primary : 'transparent',
-                            color: theme.text.primary
+                            backgroundColor:
+                              getCurrentConflict()?.fileConflict.file ===
+                              fileConflict.file
+                                ? theme.background.primary
+                                : 'transparent',
+                            color: theme.text.primary,
+                            border: 'none',
                           }}
-                          onClick={() => {
-                            // Jump to first conflict in this file
-                            let index = 0
-                            for (const fc of mergeConflicts) {
-                              if (fc.file === fileConflict.file) {
-                                setCurrentConflictIndex(index)
-                                break
-                              }
-                              index += fc.conflicts.length
-                            }
-                          }}
+                          type="button"
                         >
                           {fileResolved ? (
-                            <CheckCircle size={16} style={{ color: theme.status.success }} />
+                            <CheckCircle
+                              size={16}
+                              style={{ color: theme.status.success }}
+                            />
                           ) : (
-                            <WarningCircle size={16} style={{ color: theme.status.warning }} />
+                            <WarningCircle
+                              size={16}
+                              style={{ color: theme.status.warning }}
+                            />
                           )}
-                          <span className="text-sm truncate">{fileConflict.file}</span>
-                        </div>
+                          <span className="text-sm truncate">
+                            {fileConflict.file}
+                          </span>
+                        </button>
                       )
                     })}
                   </div>
                 </div>
 
                 {/* Right Pane - Code View */}
-                <div className="flex-1 overflow-y-auto p-6" style={{ backgroundColor: theme.background.primary }}>
-                  {getCurrentConflict() && (() => {
-                    const { fileConflict, conflict } = getCurrentConflict()!
+                <div
+                  className="flex-1 overflow-y-auto p-6"
+                  style={{ backgroundColor: theme.background.primary }}
+                >
+                  {(() => {
+                    const currentConflict = getCurrentConflict()
+                    if (!currentConflict) return null
+
+                    const { fileConflict, conflict } = currentConflict
                     const lines = fileConflict.fullContent.split('\n')
                     const isResolved = resolutions.has(conflict.id)
                     const resolution = resolutions.get(conflict.id)
@@ -1014,27 +1257,45 @@ export function Overview({
                     return (
                       <div>
                         <div className="mb-4">
-                          <h4 className="text-sm font-medium mb-2" style={{ color: theme.text.secondary }}>
+                          <h4
+                            className="text-sm font-medium mb-2"
+                            style={{ color: theme.text.secondary }}
+                          >
                             {fileConflict.file}
                           </h4>
                         </div>
 
-                        <div className="font-mono text-sm" style={{ color: theme.text.primary }}>
+                        <div
+                          className="font-mono text-sm"
+                          style={{ color: theme.text.primary }}
+                        >
                           {lines.map((line, idx) => {
                             const lineNumber = idx + 1
-                            const isInConflict = lineNumber >= conflict.startLine && lineNumber <= conflict.endLine
+                            const isInConflict =
+                              lineNumber >= conflict.startLine &&
+                              lineNumber <= conflict.endLine
 
                             // Detect conflict markers
                             const isConflictStart = line.startsWith('<<<<<<<')
-                            const isConflictSeparator = line.trim() === '======='
+                            const isConflictSeparator =
+                              line.trim() === '======='
                             const isConflictEnd = line.startsWith('>>>>>>>')
 
                             // Determine background color based on position in conflict
                             let backgroundColor = 'transparent'
-                            if (isInConflict && !isConflictStart && !isConflictSeparator && !isConflictEnd) {
+                            if (
+                              isInConflict &&
+                              !isConflictStart &&
+                              !isConflictSeparator &&
+                              !isConflictEnd
+                            ) {
                               // Find separator line to determine if this is current or incoming
                               let separatorIdx = -1
-                              for (let i = conflict.startLine - 1; i <= conflict.endLine - 1; i++) {
+                              for (
+                                let i = conflict.startLine - 1;
+                                i <= conflict.endLine - 1;
+                                i++
+                              ) {
                                 if (lines[i] && lines[i].trim() === '=======') {
                                   separatorIdx = i
                                   break
@@ -1044,24 +1305,37 @@ export function Overview({
                               if (separatorIdx !== -1) {
                                 if (idx < separatorIdx) {
                                   // Current changes (before separator) - light green
-                                  backgroundColor = theme.status.success + '15'
+                                  backgroundColor = `${theme.status.success}15`
                                 } else if (idx > separatorIdx) {
                                   // Incoming changes (after separator) - light blue
-                                  backgroundColor = theme.status.info + '15'
+                                  backgroundColor = `${theme.status.info}15`
                                 }
                               }
-                            } else if (isConflictStart || isConflictSeparator || isConflictEnd) {
+                            } else if (
+                              isConflictStart ||
+                              isConflictSeparator ||
+                              isConflictEnd
+                            ) {
                               // Marker lines - grey
                               backgroundColor = theme.background.tertiary
                             }
 
                             return (
                               <div key={idx}>
-                                <div className="flex" style={{ backgroundColor }}>
-                                  <span className="inline-block w-12 text-right mr-4 select-none" style={{ color: theme.text.muted }}>
+                                <div
+                                  className="flex"
+                                  style={{ backgroundColor }}
+                                >
+                                  <span
+                                    className="inline-block w-12 text-right mr-4 select-none"
+                                    style={{ color: theme.text.muted }}
+                                  >
                                     {lineNumber}
                                   </span>
-                                  <span className="flex-1" style={{ whiteSpace: 'pre-wrap' }}>
+                                  <span
+                                    className="flex-1"
+                                    style={{ whiteSpace: 'pre-wrap' }}
+                                  >
                                     {line || ' '}
                                   </span>
                                 </div>
@@ -1073,42 +1347,71 @@ export function Overview({
                                       <>
                                         <button
                                           className="px-3 py-1.5 text-xs rounded transition-colors"
-                                          onClick={() => handleConflictResolution(conflict.id, 'current', conflict.currentContent)}
+                                          onClick={() =>
+                                            handleConflictResolution(
+                                              conflict.id,
+                                              'current',
+                                              conflict.currentContent
+                                            )
+                                          }
                                           style={{
-                                            backgroundColor: theme.background.tertiary,
+                                            backgroundColor:
+                                              theme.background.tertiary,
                                             color: theme.text.primary,
-                                            border: `1px solid ${theme.border.primary}`
+                                            border: `1px solid ${theme.border.primary}`,
                                           }}
                                         >
                                           Accept Current Change
                                         </button>
                                         <button
                                           className="px-3 py-1.5 text-xs rounded transition-colors"
-                                          onClick={() => handleConflictResolution(conflict.id, 'incoming', conflict.incomingContent)}
+                                          onClick={() =>
+                                            handleConflictResolution(
+                                              conflict.id,
+                                              'incoming',
+                                              conflict.incomingContent
+                                            )
+                                          }
                                           style={{
-                                            backgroundColor: theme.background.tertiary,
+                                            backgroundColor:
+                                              theme.background.tertiary,
                                             color: theme.text.primary,
-                                            border: `1px solid ${theme.border.primary}`
+                                            border: `1px solid ${theme.border.primary}`,
                                           }}
                                         >
                                           Accept Incoming Change
                                         </button>
                                         <button
                                           className="px-3 py-1.5 text-xs rounded transition-colors"
-                                          onClick={() => handleConflictResolution(conflict.id, 'both', `${conflict.currentContent}\n${conflict.incomingContent}`)}
+                                          onClick={() =>
+                                            handleConflictResolution(
+                                              conflict.id,
+                                              'both',
+                                              `${conflict.currentContent}\n${conflict.incomingContent}`
+                                            )
+                                          }
                                           style={{
-                                            backgroundColor: theme.background.tertiary,
+                                            backgroundColor:
+                                              theme.background.tertiary,
                                             color: theme.text.primary,
-                                            border: `1px solid ${theme.border.primary}`
+                                            border: `1px solid ${theme.border.primary}`,
                                           }}
                                         >
                                           Accept Both Changes
                                         </button>
                                       </>
                                     ) : (
-                                      <div className="flex items-center gap-2 text-sm" style={{ color: theme.status.success }}>
+                                      <div
+                                        className="flex items-center gap-2 text-sm"
+                                        style={{
+                                          color: theme.status.success,
+                                        }}
+                                      >
                                         <CheckCircle size={16} />
-                                        <span>Resolved with: {resolution?.resolution}</span>
+                                        <span>
+                                          Resolved with:{' '}
+                                          {resolution?.resolution}
+                                        </span>
                                       </div>
                                     )}
                                   </div>
