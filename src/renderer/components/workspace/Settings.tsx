@@ -27,19 +27,14 @@ const fontFamilyDisplayNames: Record<FontFamily, string> = {
 }
 
 export function Settings() {
-  const {
-    theme,
-    fontPreferences,
-    setFontSize,
-    setFontFamily,
-  } = useTheme()
+  const { theme, fontPreferences, setFontSize, setFontFamily } = useTheme()
   const themeClasses = createThemeClasses(theme)
-  const [activeSection, setActiveSection] = useState<SettingsSection>('appearance')
+  const [activeSection, setActiveSection] =
+    useState<SettingsSection>('appearance')
 
   const sidebarItems = [
     { id: 'appearance' as const, label: 'Appearance', icon: TextAa },
     { id: 'authentication' as const, label: 'Authentication', icon: Key },
-    { id: 'general' as const, label: 'General', icon: Monitor },
   ]
 
   const renderAppearanceSection = () => (
@@ -141,28 +136,10 @@ export function Settings() {
           Authentication Provider
         </h3>
         <p className={`${themeClasses.textSecondary} mb-6`}>
-          Configure your authentication provider to connect to Claude AI. Choose between Anthropic Direct API, AWS Bedrock, or Google Vertex AI.
+          Configure your authentication provider to connect to Claude AI. Choose
+          between Anthropic Direct API, AWS Bedrock, or Google Vertex AI.
         </p>
         <ProviderTabs />
-      </div>
-    </div>
-  )
-
-  const renderGeneralSection = () => (
-    <div className="space-y-6">
-      <div>
-        <h3
-          className={`text-lg font-semibold ${themeClasses.textPrimary} mb-4`}
-        >
-          General Settings
-        </h3>
-        <div
-          className={`${themeClasses.bgCard} border ${themeClasses.borderSecondary} rounded-lg p-4`}
-        >
-          <p className={themeClasses.textSecondary}>
-            General settings coming soon...
-          </p>
-        </div>
       </div>
     </div>
   )
@@ -173,8 +150,6 @@ export function Settings() {
         return renderAppearanceSection()
       case 'authentication':
         return renderAuthenticationSection()
-      case 'general':
-        return renderGeneralSection()
       default:
         return renderAppearanceSection()
     }

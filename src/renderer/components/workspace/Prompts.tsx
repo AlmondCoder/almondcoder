@@ -703,7 +703,7 @@ export function Prompts({ projectContext }: PromptsProps) {
               <h3
                 className={`text-lg font-semibold ${themeClasses.textPrimary}`}
               >
-                Hello?
+                Prompt Agents
               </h3>
             ) : viewMode === 'memory' ? (
               <h3
@@ -791,16 +791,6 @@ export function Prompts({ projectContext }: PromptsProps) {
                   className="w-px h-6"
                   style={{ backgroundColor: theme.border.primary }}
                 />
-                <button
-                  className="p-2 text-sm transition-colors flex items-center justify-center"
-                  style={{
-                    backgroundColor: theme.background.tertiary,
-                    color: theme.text.primary,
-                  }}
-                  title="Keyboard Shortcuts"
-                >
-                  <Keyboard className="w-4 h-4" />
-                </button>
               </div>
 
               {/* Conversation and Diff group */}

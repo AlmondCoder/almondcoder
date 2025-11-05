@@ -112,6 +112,7 @@ const API = {
   abortWorktreeMerge: (params: {
     projectPath: string
     hasStashedMainRepo: boolean
+    originalBranch?: string
   }) => ipcRenderer.invoke('abort-worktree-merge', params),
   discardWorktreeChanges: (params: {
     projectPath: string

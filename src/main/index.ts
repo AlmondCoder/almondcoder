@@ -1596,6 +1596,7 @@ ipcMain.handle(
               targetBranch,
               worktreePath,
               hasStashedMainRepo,
+              originalBranch: currentBranchName,
             }
           }
 
@@ -1699,12 +1700,28 @@ ipcMain.handle(
 // Abort worktree merge
 ipcMain.handle(
   'abort-worktree-merge',
-  async (event, { projectPath, hasStashedMainRepo }) => {
+  async (event, { projectPath, hasStashedMainRepo, originalBranch }) => {
     try {
       console.log('Aborting worktree merge...')
 
       // Abort the merge
       await execAsync('git merge --abort', { cwd: projectPath })
+
+      // Restore original branch if provided
+      if (originalBranch) {
+        try {
+          const { stdout: currentBranch } = await execAsync(
+            'git rev-parse --abbrev-ref HEAD',
+            { cwd: projectPath }
+          )
+          if (currentBranch.trim() !== originalBranch) {
+            await execAsync(`git checkout ${originalBranch}`, { cwd: projectPath })
+            console.log(`Restored original branch: ${originalBranch}`)
+          }
+        } catch (checkoutError) {
+          console.warn('Could not restore original branch:', checkoutError)
+        }
+      }
 
       // Pop stash if we stashed
       if (hasStashedMainRepo) {

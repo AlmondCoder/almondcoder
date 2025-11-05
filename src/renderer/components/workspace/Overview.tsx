@@ -20,6 +20,7 @@ import {
   CheckCircle,
   WarningCircle,
   GitBranch as GitBranchIcon,
+  Dot,
 } from '@phosphor-icons/react'
 
 const { App } = window
@@ -111,10 +112,12 @@ const BranchNodeLabel = ({
   branch,
   isParentBranch,
   promptText,
+  isBeingDraggedOver,
 }: {
   branch: GitBranch
   isParentBranch: boolean
   promptText?: string
+  isBeingDraggedOver?: boolean
 }) => {
   if (isParentBranch) {
     // Parent branch: Simple flat design
@@ -124,7 +127,7 @@ const BranchNodeLabel = ({
           style={{
             fontSize: '13px',
             fontWeight: '600',
-            color: '#1a1a1a',
+            color: isBeingDraggedOver ? '#FFFFFF' : '#1a1a1a',
             width: '100%',
           }}
         >
@@ -143,16 +146,17 @@ const BranchNodeLabel = ({
         display: 'flex',
         flexDirection: 'column',
         margin: '-10px',
+        borderRadius: '8px',
+        backgroundColor: isBeingDraggedOver
+          ? 'rgb(68, 69, 71)'
+          : 'rgb(229, 231, 235)',
       }}
     >
       {/* Header section with branch name */}
       <div
         style={{
-          backgroundColor: 'rgb(229, 231, 235)',
-          padding: '8px 12px',
-          borderTopLeftRadius: '8px',
-          borderTopRightRadius: '8px',
-          borderBottom: '1px solid rgb(209, 213, 219)',
+          padding: '4px 4px',
+          borderRadius: '8px',
           width: '116%',
         }}
       >
@@ -160,38 +164,55 @@ const BranchNodeLabel = ({
           style={{
             fontSize: '8px',
             fontWeight: '500',
-            color: '#4b5563',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
+            color: isBeingDraggedOver ? '#FFFFFF' : '#4b5563',
+            width: '100%',
+            whiteSpace: 'normal',
+            wordBreak: 'break-all',
+            overflowWrap: 'break-word',
+            display: 'flex', // Add this
+            alignItems: 'center', // Add this to vertically center
+            gap: '0px', // Add this for spacing between icon and text
           }}
         >
-          {branch.name.substring(12)}
+          • {branch.name.replace('almondcoder/', '')}
         </div>
       </div>
 
       {/* Content section with commit details */}
       <div
         style={{
-          backgroundColor: '#FFFFFF',
-          padding: '4px',
-          borderBottomLeftRadius: '8px',
-          borderBottomRightRadius: '8px',
-          gap: '6px',
-          minHeight: 'fit-content',
+          paddingRight: '3px',
+          paddingLeft: '3px',
         }}
       >
         <div
           style={{
-            fontSize: '8px',
-            color: '#1a1a1a',
-            lineHeight: '1.2',
-            fontWeight: '400',
-            width: '100%',
+            backgroundColor: '#FFFFFF',
+            padding: '4px',
+            borderBottomLeftRadius: '2px',
+            borderBottomRightRadius: '2px',
+            borderTopRightRadius: '2px',
+            borderTopLeftRadius: '2px',
+
+            gap: '6px',
+            width: '115%',
             minHeight: 'fit-content',
           }}
         >
-          {promptText || branch.subject}
+          <div
+            style={{
+              fontSize: '8px',
+              color: '#1a1a1a',
+              lineHeight: '1.2',
+              fontWeight: '400',
+              width: '115%',
+              paddingRight: '20px',
+              marginBottom: '2px',
+              minHeight: 'fit-content',
+            }}
+          >
+            {promptText || branch.subject}
+          </div>
         </div>
       </div>
     </div>
@@ -226,6 +247,7 @@ export function Overview({
     targetBranch: string
     worktreePath: string
     hasStashedMainRepo: boolean
+    originalBranch?: string
   } | null>(null)
 
   // Sidebar state for hierarchical branch tree
@@ -240,6 +262,105 @@ export function Overview({
       loadGitData()
     }
   }, [projectContext])
+
+  // Update node style when dragging (style the dragged node itself)
+  useEffect(() => {
+    if (!draggedNodeId) {
+      // No drag in progress - reset all nodes to normal colors
+      setNodes(prevNodes =>
+        prevNodes.map(node => {
+          const isParentBranch = !node.id.startsWith('almondcoder/')
+          const branch = gitData?.branches.find(b => b.name === node.id)
+          if (!branch) return node
+
+          const promptText = node.data.promptText || branch.subject || undefined
+
+          const nodeStyle = {
+            background: isParentBranch
+              ? 'rgb(210, 210, 208)'
+              : 'rgb(229, 231, 235)',
+            color: '#333333',
+            border: `1px solid ${selectedBranch === node.id ? '#3B82F6' : '#E5E5E0'}`,
+            borderRadius: '8px',
+            fontSize: '12px',
+            fontWeight: 'normal',
+            boxShadow:
+              selectedBranch === node.id
+                ? '0 2px 8px rgba(59, 130, 246, 0.2)'
+                : '0 1px 3px rgba(0, 0, 0, 0.1)',
+            padding: '10px',
+          }
+
+          return {
+            ...node,
+            style: nodeStyle,
+            data: {
+              ...node.data,
+              label: (
+                <BranchNodeLabel
+                  branch={branch}
+                  isBeingDraggedOver={false}
+                  isParentBranch={isParentBranch}
+                  promptText={promptText}
+                />
+              ),
+              promptText,
+            },
+          }
+        })
+      )
+    } else {
+      // Drag in progress - style the dragged node
+      setNodes(prevNodes =>
+        prevNodes.map(node => {
+          const isParentBranch = !node.id.startsWith('almondcoder/')
+          const isBeingDragged = node.id === draggedNodeId
+          const branch = gitData?.branches.find(b => b.name === node.id)
+          if (!branch) return node
+
+          const promptText = node.data.promptText || branch.subject || undefined
+
+          // Only apply dark styling to child branches (almondcoder/) being dragged
+          const shouldApplyDragStyle = isBeingDragged && !isParentBranch
+
+          const nodeStyle = {
+            background: shouldApplyDragStyle
+              ? 'rgb(68, 69, 71)'
+              : isParentBranch
+                ? 'rgb(210, 210, 208)'
+                : 'rgb(229, 231, 235)',
+            color: shouldApplyDragStyle ? '#FFFFFF' : '#333333',
+            border: `1px solid ${selectedBranch === node.id ? '#3B82F6' : '#E5E5E0'}`,
+            borderRadius: '8px',
+            fontSize: '12px',
+            fontWeight: 'normal',
+            boxShadow:
+              selectedBranch === node.id
+                ? '0 2px 8px rgba(59, 130, 246, 0.2)'
+                : '0 1px 3px rgba(0, 0, 0, 0.1)',
+            padding: '10px',
+          }
+
+          return {
+            ...node,
+            style: nodeStyle,
+            data: {
+              ...node.data,
+              label: (
+                <BranchNodeLabel
+                  branch={branch}
+                  isBeingDraggedOver={shouldApplyDragStyle}
+                  isParentBranch={isParentBranch}
+                  promptText={promptText}
+                />
+              ),
+              promptText,
+            },
+          }
+        })
+      )
+    }
+  }, [draggedNodeId, selectedBranch, gitData])
 
   const loadGitData = async () => {
     try {
@@ -321,9 +442,18 @@ export function Overview({
       // Light theme node styling
       // Parent branches (non-almondcoder) get gray background, child branches stay white
       const isParentBranch = !branch.name.startsWith('almondcoder/')
+
+      // Check if this node is being dragged over (target of drag)
+      const isBeingDraggedOver =
+        dropAction && dropAction.targetNode.id === branch.name
+
       const nodeStyle = {
-        background: isParentBranch ? 'rgb(210, 210, 208)' : '#FFFFFF',
-        color: '#333333',
+        background: isBeingDraggedOver
+          ? 'rgb(68, 69, 71)'
+          : isParentBranch
+            ? 'rgb(210, 210, 208)'
+            : 'rgb(229, 231, 235)',
+        color: isBeingDraggedOver ? '#FFFFFF' : '#333333',
         border: `1px solid ${selectedBranch === branch.name ? '#3B82F6' : '#E5E5E0'}`,
         borderRadius: '8px',
         fontSize: '12px',
@@ -345,10 +475,12 @@ export function Overview({
           label: (
             <BranchNodeLabel
               branch={branch}
+              isBeingDraggedOver={isBeingDraggedOver}
               isParentBranch={isParentBranch}
               promptText={promptText}
             />
           ),
+          promptText, // Store for future updates in useEffect
         },
         style: nodeStyle,
       }
@@ -524,6 +656,7 @@ export function Overview({
           targetBranch: result.targetBranch,
           worktreePath: result.worktreePath,
           hasStashedMainRepo: result.hasStashedMainRepo,
+          originalBranch: result.originalBranch,
         })
 
         // Show conflicts in modal
@@ -727,7 +860,7 @@ export function Overview({
         // Reset state
         setShowConflictPanel(false)
         setMergeConflicts([])
-        setResolutions({})
+        setResolutions(new Map())
         setMergeContext(null)
 
         // Reload git data
@@ -758,6 +891,7 @@ export function Overview({
       const result = await App.abortWorktreeMerge({
         projectPath: projectContext.projectPath,
         hasStashedMainRepo: mergeContext.hasStashedMainRepo,
+        originalBranch: mergeContext.originalBranch,
       })
 
       if (result.success) {
@@ -766,7 +900,7 @@ export function Overview({
         // Reset state
         setShowConflictPanel(false)
         setMergeConflicts([])
-        setResolutions({})
+        setResolutions(new Map())
         setMergeContext(null)
 
         // Reload git data
@@ -980,7 +1114,8 @@ export function Overview({
               style={{
                 left: dropAction.menuPosition.x,
                 top: dropAction.menuPosition.y,
-                backgroundColor: theme.background.card,
+                backgroundColor: `white`,
+                width: '180px',
                 border: `1px solid ${theme.border.primary}`,
               }}
             >
@@ -1003,7 +1138,13 @@ export function Overview({
               {/* Title */}
               <div
                 className="text-base font-semibold mb-6"
-                style={{ color: theme.text.primary }}
+                style={{
+                  color: theme.text.primary,
+                  wordBreak: 'break-all',
+                  overflowWrap: 'break-word',
+                  alignItems: 'center',
+                  paddingRight: '32px',
+                }}
               >
                 Merge {dropAction.draggedNode.id}
                 <br />
@@ -1016,9 +1157,7 @@ export function Overview({
                 >
                   into{' '}
                   {dropAction.targetNode.id === 'main' ||
-                  dropAction.targetNode.id === 'master'
-                    ? 'production'
-                    : dropAction.targetNode.id}
+                    dropAction.targetNode.id}
                 </span>
               </div>
 
