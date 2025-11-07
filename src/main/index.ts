@@ -27,6 +27,7 @@ import { makeAppSetup } from 'lib/electron-app/factories/app/setup'
 import { MainWindow } from './windows/main'
 import {
   executeClaudeQuery,
+  abortQuery,
   updateAutoAcceptState,
   getAllConversationStates,
   updateConversationState,
@@ -41,11 +42,6 @@ import { parseGitDiff } from './git-diff-parser'
 import type {
   EnhancedPromptHistoryItem,
   ConversationHistory,
-  ConversationMessage,
-  ProjectMetadata,
-  ProjectSettings,
-  BranchStatus,
-  WorktreeInfo,
 } from '../shared/types'
 
 const execAsync = promisify(exec)
@@ -60,14 +56,10 @@ const getRecentProjectsPath = () => {
 }
 
 const loadRecentProjects = () => {
-  try {
-    const filePath = getRecentProjectsPath()
-    if (existsSync(filePath)) {
-      const data = readFileSync(filePath, 'utf8')
-      return JSON.parse(data)
-    }
-  } catch (error) {
-    console.error('Error loading recent projects:', error)
+  const filePath = getRecentProjectsPath()
+  if (existsSync(filePath)) {
+    const data = readFileSync(filePath, 'utf8')
+    return JSON.parse(data)
   }
   return []
 }
@@ -606,11 +598,11 @@ ipcMain.handle(
       console.log('🔒 Attempting to acquire lock for:', expandedFilePath)
       release = await lockfile.lock(expandedFilePath, {
         retries: {
-          retries: 10,        // Retry up to 10 times
-          minTimeout: 50,     // Start with 50ms delay
-          maxTimeout: 1000,   // Max 1 second delay between retries
+          retries: 10, // Retry up to 10 times
+          minTimeout: 50, // Start with 50ms delay
+          maxTimeout: 1000, // Max 1 second delay between retries
         },
-        stale: 10000,         // Consider lock stale after 10 seconds
+        stale: 10000, // Consider lock stale after 10 seconds
       })
       console.log('✅ Lock acquired for:', expandedFilePath)
 
@@ -1715,7 +1707,9 @@ ipcMain.handle(
             { cwd: projectPath }
           )
           if (currentBranch.trim() !== originalBranch) {
-            await execAsync(`git checkout ${originalBranch}`, { cwd: projectPath })
+            await execAsync(`git checkout ${originalBranch}`, {
+              cwd: projectPath,
+            })
             console.log(`Restored original branch: ${originalBranch}`)
           }
         } catch (checkoutError) {
@@ -2098,6 +2092,24 @@ ipcMain.handle(
     }
   }
 )
+
+// ============================================================================
+// Abort Claude SDK Query IPC Handler
+// ============================================================================
+// LOGIC: This handler receives abort requests from the renderer and calls
+// the abortQuery function from claude-sdk.ts to stop the running query
+ipcMain.handle('abort-claude-sdk', async (event, promptId: string) => {
+  try {
+    await abortQuery(promptId, event.sender)
+    return { success: true }
+  } catch (error: any) {
+    console.error('Error aborting Claude SDK:', error)
+    return {
+      success: false,
+      error: error.message,
+    }
+  }
+})
 
 // ============================================================================
 // Auto-Accept State Update IPC Handler

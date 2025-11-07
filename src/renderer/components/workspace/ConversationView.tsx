@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import {
   ClipboardText,
@@ -1210,6 +1210,45 @@ export function ConversationView({
     }
   }
 
+  // ============================================================================
+  // Abort Execution Handler
+  // ============================================================================
+  // LOGIC: When user clicks the stop button, abort the running Claude SDK query
+  const handleAbort = useCallback(() => {
+    if (!selectedConversation) return
+
+    const promptId = selectedConversation.promptId
+
+    console.log('🛑 [Abort] Stopping execution for promptId:', promptId)
+
+    // Call abort IPC
+    window.App.abortClaudeSDK(promptId)
+      .then((result: any) => {
+        if (result.success) {
+          console.log('✅ [Abort] Successfully aborted execution')
+
+          // Update busy conversation state to show it's aborted
+          setBusyConversations((prev) => {
+            const updated = new Map(prev)
+            const existing = updated.get(promptId)
+            if (existing) {
+              updated.set(promptId, {
+                ...existing,
+                status: 'aborted',
+                error: 'Execution stopped by user',
+              })
+            }
+            return updated
+          })
+        } else {
+          console.error('❌ [Abort] Failed to abort:', result.error)
+        }
+      })
+      .catch((error: any) => {
+        console.error('❌ [Abort] Error aborting execution:', error)
+      })
+  }, [selectedConversation])
+
   return (
     <div
       className="flex-1 flex flex-col h-full overflow-hidden"
@@ -1326,6 +1365,7 @@ export function ConversationView({
                 isNewConversation={isNewConversation}
                 onBranchSelect={setSelectedBranch}
                 onExecute={handleExecute}
+                onAbort={handleAbort}
                 onWorktreeSelect={setSelectedWorktree}
                 projectContext={projectContext}
                 selectedBranch={selectedBranch}
@@ -2055,6 +2095,7 @@ export function ConversationView({
                 isNewConversation={false}
                 onBranchSelect={setSelectedBranch}
                 onExecute={handleExecute}
+                onAbort={handleAbort}
                 onNewConversation={() => {
                   if (
                     isNewConversation &&

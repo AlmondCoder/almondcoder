@@ -13,6 +13,7 @@ import { ipcMain } from 'electron'
 // updated in real-time when user toggles during an active conversation.
 // This avoids stale closure values and expensive disk reads.
 const autoAcceptCache = new Map<string, boolean>()
+const abortControllers = new Map<string, AbortController>()
 
 // ============================================================================
 // In-Memory Cache for Conversation State
@@ -22,7 +23,13 @@ const autoAcceptCache = new Map<string, boolean>()
 // and broadcasts changes to renderer for real-time UI updates.
 export interface ConversationState {
   promptId: string
-  status: 'idle' | 'running' | 'waiting_permission' | 'completed' | 'error'
+  status:
+    | 'idle'
+    | 'running'
+    | 'waiting_permission'
+    | 'completed'
+    | 'error'
+    | 'aborted'
   sessionId?: string
   pendingPermission?: {
     requestId: string
@@ -152,11 +159,49 @@ export interface ClaudeSDKOptions {
   allowedTools?: string[]
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
   resume?: string // Session ID to resume
-
+  abortController?: AbortController
   // New fields for permission system:
   promptId?: string // Which conversation is this (needed to route permissions)
   conversationTitle?: string // Display name for UI (first 50 chars of prompt)
   autoAcceptEnabled?: boolean // Whether auto-accept is enabled (bypass permissions)
+}
+
+export async function abortQuery(
+  prompId: string,
+  sender?: Electron.WebContents
+) {
+  const controller = abortControllers.get(prompId)
+  console.log(`Received abort request for controller: ${controller}`)
+  if (controller) {
+    controller.abort()
+    console.log(`Aborting query: ${prompId}`)
+
+    // Send abort message as a tool call for rendering in conversation view
+    if (sender) {
+      sender.send(
+        'command-output',
+        JSON.stringify({
+          type: 'tool_use',
+          data: {
+            type: 'tool_use',
+            id: `abort_${Date.now()}`,
+            name: 'Abort',
+            input: {
+              reason: 'User cancelled execution',
+            },
+          },
+        })
+      )
+    }
+
+    // Clean up abort controller
+    abortControllers.delete(prompId)
+
+    // Update conversation state to 'aborted'
+    updateConversationState(prompId, 'aborted')
+  } else {
+    console.log(`Query ${prompId} not found`)
+  }
 }
 
 export async function executeClaudeQuery(
@@ -172,6 +217,7 @@ export async function executeClaudeQuery(
     promptId,
     conversationTitle,
     autoAcceptEnabled = false,
+    abortController = new AbortController(),
   } = options
 
   console.log('Starting Claude SDK query:', {
@@ -182,6 +228,7 @@ export async function executeClaudeQuery(
     resume,
     promptId,
     autoAcceptEnabled,
+    abortController,
   })
 
   // ============================================================================
@@ -190,7 +237,9 @@ export async function executeClaudeQuery(
   // LOGIC: Load active provider and credentials, then set environment variables
   // so the Claude SDK uses the correct authentication provider
   try {
-    const { getActiveProvider, getCredentials } = await import('./credential-manager')
+    const { getActiveProvider, getCredentials } = await import(
+      './credential-manager'
+    )
     const activeProvider = await getActiveProvider()
 
     if (activeProvider) {
@@ -207,20 +256,25 @@ export async function executeClaudeQuery(
           process.env.CLAUDE_CODE_USE_BEDROCK = '1'
           process.env.AWS_ACCESS_KEY_ID = bedrockCreds.accessKeyId
           process.env.AWS_SECRET_ACCESS_KEY = bedrockCreds.secretAccessKey
-          if (bedrockCreds.sessionToken) process.env.AWS_SESSION_TOKEN = bedrockCreds.sessionToken
+          if (bedrockCreds.sessionToken)
+            process.env.AWS_SESSION_TOKEN = bedrockCreds.sessionToken
           if (bedrockCreds.region) process.env.AWS_REGION = bedrockCreds.region
-          if (bedrockCreds.model) process.env.ANTHROPIC_MODEL = bedrockCreds.model
+          if (bedrockCreds.model)
+            process.env.ANTHROPIC_MODEL = bedrockCreds.model
         } else if (activeProvider === 'vertex') {
           const vertexCreds = credentials as any
           process.env.CLAUDE_CODE_USE_VERTEX = '1'
           process.env.CLOUD_ML_REGION = vertexCreds.region || 'global'
           process.env.ANTHROPIC_VERTEX_PROJECT_ID = vertexCreds.projectId
           if (vertexCreds.model) process.env.ANTHROPIC_MODEL = vertexCreds.model
-          if (vertexCreds.smallFastModel) process.env.ANTHROPIC_SMALL_FAST_MODEL = vertexCreds.smallFastModel
-          if (vertexCreds.disablePromptCaching) process.env.DISABLE_PROMPT_CACHING = '1'
+          if (vertexCreds.smallFastModel)
+            process.env.ANTHROPIC_SMALL_FAST_MODEL = vertexCreds.smallFastModel
+          if (vertexCreds.disablePromptCaching)
+            process.env.DISABLE_PROMPT_CACHING = '1'
         } else if (activeProvider === 'anthropic') {
           const anthropicCreds = credentials as any
-          if (anthropicCreds.apiKey) process.env.ANTHROPIC_API_KEY = anthropicCreds.apiKey
+          if (anthropicCreds.apiKey)
+            process.env.ANTHROPIC_API_KEY = anthropicCreds.apiKey
         }
       }
     }
@@ -236,6 +290,8 @@ export async function executeClaudeQuery(
   // to be updated mid-conversation via IPC without closure staleness issues.
   if (promptId) {
     autoAcceptCache.set(promptId, autoAcceptEnabled)
+    abortControllers.set(promptId, abortController)
+
     console.log(
       `📝 [AutoAccept Cache] Initialized for ${promptId}: ${autoAcceptEnabled}`
     )
@@ -393,18 +449,11 @@ export async function executeClaudeQuery(
     })
   }
 
-  // ============================================================================
-  // DEBUG: Verify canUseTool callback is defined
-  // ============================================================================
-  console.log('🔍 [DEBUG] Verifying canUseTool callback:')
-  console.log(`   - Type: ${typeof canUseTool}`)
-  console.log(`   - Is function: ${typeof canUseTool === 'function'}`)
-  console.log(`   - permissionMode: ${permissionMode}`)
-  console.log(`   - autoAcceptEnabled: ${autoAcceptEnabled}`)
-
   try {
     // Create the query with SDK
     // Override model to fix Claude Code bug with AWS Bedrock model identifier
+
+    console.log('abortController from line 456:', abortController)
     const result = query({
       prompt,
       options: {
@@ -413,7 +462,8 @@ export async function executeClaudeQuery(
         permissionMode, // Now 'default' instead of 'acceptEdits'
         canUseTool, // ✨ ADD OUR CUSTOM PERMISSION CALLBACK
         resume, // Session resumption
-        includePartialMessages: false, // CRITICAL: Enable streaming of partial messages
+        includePartialMessages: false,
+        abortController, // CRITICAL: Enable streaming of partial messages
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
@@ -433,7 +483,7 @@ export async function executeClaudeQuery(
       // This sends each message as soon as it's received from the SDK
       sender.send('command-output', {
         type: 'stdout',
-        data: jsonMessage + '\n', // Add newline to match CLI format
+        data: `${jsonMessage}\n`, // Add newline to match CLI format
         rawData: false, // This is JSON, not ANSI
         promptId: promptId, // Identify which conversation this message belongs to
       })
@@ -462,12 +512,11 @@ export async function executeClaudeQuery(
     const errorMessage = error instanceof Error ? error.message : String(error)
     sender.send('command-output', {
       type: 'stderr',
-      data:
-        JSON.stringify({
-          type: 'error',
-          error: errorMessage,
-          messageCount,
-        }) + '\n',
+      data: `${JSON.stringify({
+        type: 'error',
+        error: errorMessage,
+        messageCount,
+      })}\n`,
       rawData: false,
       promptId: promptId, // Identify which conversation this error belongs to
     })

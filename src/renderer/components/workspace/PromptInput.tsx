@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, X, ArrowUp, CaretDown } from '@phosphor-icons/react'
+import { Plus, X, ArrowUp, CaretDown, Square } from '@phosphor-icons/react'
 import { useTheme } from '../../theme/ThemeContext'
 
 interface PromptInputProps {
   onExecute: (prompt: string) => void
+  onAbort: () => void
   isNewConversation: boolean
   isExecuting: boolean
   projectContext: any
@@ -17,6 +18,7 @@ interface PromptInputProps {
 
 export function PromptInput({
   onExecute,
+  onAbort,
   isNewConversation,
   isExecuting,
   projectContext,
@@ -366,49 +368,49 @@ export function PromptInput({
             )}
           </div>
 
-          {/* Right side: Execute button */}
+          {/* Right side: Execute/Stop button */}
           <button
             className={`disabled:opacity-50 disabled:cursor-not-allowed p-2 rounded transition-colors flex items-center justify-center flex-shrink-0 ${
               isExecuting
                 ? isLightTheme
-                  ? 'bg-gray-400'
-                  : 'bg-gray-600'
+                  ? 'bg-red-500 hover:bg-red-600'
+                  : 'bg-red-600 hover:bg-red-700'
                 : isLightTheme
                   ? 'bg-black hover:bg-gray-800'
                   : 'bg-white hover:bg-gray-200'
             }`}
             disabled={
               !projectContext ||
-              !currentPrompt.trim() ||
-              (isNewConversation && !selectedBranch) ||
-              isExecuting
+              (!currentPrompt.trim() && !isExecuting) ||
+              (isNewConversation && !selectedBranch && !isExecuting)
             }
-            onClick={handleExecute}
+            onClick={isExecuting ? onAbort : handleExecute}
             title={
-              !projectContext
-                ? 'Please select a project first'
-                : !currentPrompt.trim()
-                  ? 'Please enter a prompt'
-                  : isNewConversation && !selectedBranch
-                    ? 'Please select a branch'
-                    : isExecuting
-                      ? 'This conversation is currently executing'
+              isExecuting
+                ? 'Stop execution'
+                : !projectContext
+                  ? 'Please select a project first'
+                  : !currentPrompt.trim()
+                    ? 'Please enter a prompt'
+                    : isNewConversation && !selectedBranch
+                      ? 'Please select a branch'
                       : isNewConversation
                         ? 'Create new conversation and execute'
                         : 'Execute the prompt'
             }
           >
-            <ArrowUp
-              className={`w-4 h-4 ${
-                isExecuting
-                  ? isLightTheme
-                    ? 'text-white'
-                    : 'text-gray-300'
-                  : isLightTheme
-                    ? 'text-white'
-                    : 'text-black'
-              }`}
-            />
+            {isExecuting ? (
+              <Square
+                className="w-4 h-4 text-white"
+                weight="fill"
+              />
+            ) : (
+              <ArrowUp
+                className={`w-4 h-4 ${
+                  isLightTheme ? 'text-white' : 'text-black'
+                }`}
+              />
+            )}
           </button>
         </div>
       </div>

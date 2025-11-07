@@ -122,7 +122,8 @@ export interface BusyConversation {
   // - 'waiting_permission': Paused, waiting for user to Accept or override with new prompt
   // - 'completed': Conversation finished successfully
   // - 'error': Conversation encountered an error
-  status: 'running' | 'waiting_permission' | 'completed' | 'error'
+  // - 'aborted': Conversation was stopped by user
+  status: 'running' | 'waiting_permission' | 'completed' | 'error' | 'aborted'
 
   sessionId?: string // Claude SDK session ID for resumption
   error?: string // Error message if status is 'error'

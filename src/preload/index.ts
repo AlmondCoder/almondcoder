@@ -157,6 +157,15 @@ const API = {
     return ipcRenderer.invoke('execute-claude-sdk', options)
   },
 
+  /**
+   * Abort a running Claude SDK query
+   * LOGIC: Sends abort request to main process which will stop the running query
+   * and send an abort tool call message for rendering in the conversation view
+   */
+  abortClaudeSDK: (promptId: string) => {
+    return ipcRenderer.invoke('abort-claude-sdk', promptId)
+  },
+
   // ============================================================================
   // Permission System IPC Methods
   // ============================================================================
