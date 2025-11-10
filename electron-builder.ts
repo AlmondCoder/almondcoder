@@ -45,6 +45,8 @@ export default {
     entitlementsInherit: `${resources}/build/entitlements.mac.plist`,
     gatekeeperAssess: false,
     hardenedRuntime: true,
+    identity: 'Vaibhav Maheshwari (5A3Y32DLL4)',
+    notarize: false,
   },
 
   linux: {
