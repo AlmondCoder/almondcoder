@@ -46,7 +46,6 @@
     "clsx": "^2.1.1",
     "electron-router-dom": "^2.1.0",
     "keytar": "^7.9.0",
-    "node-pty-prebuilt-multiarch": "0.10.1-pre.5",
     "proper-lockfile": "^4.1.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -59,6 +58,9 @@
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^13.0.0"
+  },
+  "optionalDependencies": {
+    "node-pty-prebuilt-multiarch": "0.10.1-pre.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.3",
