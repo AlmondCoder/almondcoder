@@ -20,6 +20,11 @@ const appId = `com.${authorInKebabCase}.${name}`.toLowerCase()
 
 const artifactName = [`${name}-v${version}`, '-${os}.${ext}'].join('')
 
+// Only use identity if not in CI or if explicitly enabled
+const macIdentity = process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'false'
+  ? null
+  : 'Vaibhav Maheshwari (5A3Y32DLL4)'
+
 export default {
   appId,
   productName: displayName,
@@ -45,7 +50,7 @@ export default {
     entitlementsInherit: `${resources}/build/entitlements.mac.plist`,
     gatekeeperAssess: false,
     hardenedRuntime: true,
-    identity: 'Vaibhav Maheshwari (5A3Y32DLL4)',
+    ...(macIdentity && { identity: macIdentity }),
     notarize: false,
   },
 

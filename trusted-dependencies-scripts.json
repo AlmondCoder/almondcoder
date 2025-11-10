@@ -6,5 +6,5 @@
   "@tailwindcss/oxide",
   "electron-winstaller",
   "keytar",
-  "node-pty"
+  "node-pty-prebuilt-multiarch"
 ]

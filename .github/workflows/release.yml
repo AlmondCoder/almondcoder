@@ -32,9 +32,21 @@ jobs:
           cache: "pnpm"
         continue-on-error: true
 
+      - name: Setup MSBuild (Windows)
+        if: startsWith(matrix.os, 'windows-latest')
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Add msbuild to PATH (Windows)
+        if: startsWith(matrix.os, 'windows-latest')
+        shell: bash
+        run: echo "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin" >> $GITHUB_PATH
+
       - name: Install dependencies
         run: pnpm install
         timeout-minutes: 15
+        env:
+          # Use prebuilt binaries for native modules when available
+          npm_config_build_from_source: "false"
 
       - name: apt-update
         if: startsWith(matrix.os, 'ubuntu-latest')
@@ -60,6 +72,9 @@ jobs:
           # If the commit is tagged with a version (e.g. "v1.0.0"),
           # release the app after building
           release: true
+        env:
+          # Skip code signing on CI (certificates not available)
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       # Upload artifacts as backup in case release upload fails
       - name: Upload build artifacts
