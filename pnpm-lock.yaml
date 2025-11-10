@@ -50,9 +50,6 @@ importers:
       keytar:
         specifier: ^7.9.0
         version: 7.9.0
-      node-pty-prebuilt-multiarch:
-        specifier: 0.10.1-pre.5
-        version: 0.10.1-pre.5
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
@@ -171,6 +168,10 @@ importers:
       vite-tsconfig-paths:
         specifier: ^5.1.4
         version: 5.1.4(typescript@5.9.3)(vite@7.1.9(@types/node@24.6.2)(jiti@2.6.1)(lightningcss@1.30.1)(tsx@4.20.6))
+    optionalDependencies:
+      node-pty-prebuilt-multiarch:
+        specifier: 0.10.1-pre.5
+        version: 0.10.1-pre.5
 
 packages:
 
@@ -6030,7 +6031,8 @@ snapshots:
       json-schema-traverse: 0.4.1
       uri-js: 4.4.1
 
-  ansi-regex@2.1.1: {}
+  ansi-regex@2.1.1:
+    optional: true
 
   ansi-regex@5.0.1: {}
 
@@ -6089,7 +6091,8 @@ snapshots:
       - bluebird
       - supports-color
 
-  aproba@1.2.0: {}
+  aproba@1.2.0:
+    optional: true
 
   aproba@2.1.0: {}
 
@@ -6097,6 +6100,7 @@ snapshots:
     dependencies:
       delegates: 1.0.0
       readable-stream: 2.3.8
+    optional: true
 
   are-we-there-yet@3.0.1:
     dependencies:
@@ -6375,7 +6379,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  code-point-at@1.1.0: {}
+  code-point-at@1.1.0:
+    optional: true
 
   codemirror@6.0.2:
     dependencies:
@@ -6532,6 +6537,7 @@ snapshots:
   decompress-response@4.2.1:
     dependencies:
       mimic-response: 2.1.0
+    optional: true
 
   decompress-response@6.0.0:
     dependencies:
@@ -6572,7 +6578,8 @@ snapshots:
 
   dequal@2.0.3: {}
 
-  detect-libc@1.0.3: {}
+  detect-libc@1.0.3:
+    optional: true
 
   detect-libc@2.1.1: {}
 
@@ -7020,6 +7027,7 @@ snapshots:
       string-width: 1.0.2
       strip-ansi: 3.0.1
       wide-align: 1.1.5
+    optional: true
 
   gauge@4.0.4:
     dependencies:
@@ -7366,6 +7374,7 @@ snapshots:
   is-fullwidth-code-point@1.0.0:
     dependencies:
       number-is-nan: 1.0.1
+    optional: true
 
   is-fullwidth-code-point@3.0.0: {}
 
@@ -8066,7 +8075,8 @@ snapshots:
 
   mimic-response@1.0.1: {}
 
-  mimic-response@2.1.0: {}
+  mimic-response@2.1.0:
+    optional: true
 
   mimic-response@3.1.0: {}
 
@@ -8151,13 +8161,15 @@ snapshots:
 
   ms@2.1.3: {}
 
-  nan@2.23.1: {}
+  nan@2.23.1:
+    optional: true
 
   nanoid@3.3.11: {}
 
   nanoid@5.1.6: {}
 
-  napi-build-utils@1.0.2: {}
+  napi-build-utils@1.0.2:
+    optional: true
 
   napi-build-utils@2.0.0: {}
 
@@ -8170,6 +8182,7 @@ snapshots:
   node-abi@2.30.1:
     dependencies:
       semver: 5.7.2
+    optional: true
 
   node-abi@3.77.0:
     dependencies:
@@ -8232,6 +8245,7 @@ snapshots:
     dependencies:
       nan: 2.23.1
       prebuild-install: 6.1.4
+    optional: true
 
   node-releases@2.0.23: {}
 
@@ -8270,6 +8284,7 @@ snapshots:
       console-control-strings: 1.1.0
       gauge: 2.7.4
       set-blocking: 2.0.0
+    optional: true
 
   npmlog@6.0.2:
     dependencies:
@@ -8278,9 +8293,11 @@ snapshots:
       gauge: 4.0.4
       set-blocking: 2.0.0
 
-  number-is-nan@1.0.1: {}
+  number-is-nan@1.0.1:
+    optional: true
 
-  object-assign@4.1.1: {}
+  object-assign@4.1.1:
+    optional: true
 
   object-inspect@1.13.4: {}
 
@@ -8445,6 +8462,7 @@ snapshots:
       simple-get: 3.1.1
       tar-fs: 2.1.4
       tunnel-agent: 0.6.0
+    optional: true
 
   prebuild-install@7.1.3:
     dependencies:
@@ -8991,6 +9009,7 @@ snapshots:
       decompress-response: 4.2.1
       once: 1.4.0
       simple-concat: 1.0.1
+    optional: true
 
   simple-get@4.0.1:
     dependencies:
@@ -9084,6 +9103,7 @@ snapshots:
       code-point-at: 1.1.0
       is-fullwidth-code-point: 1.0.0
       strip-ansi: 3.0.1
+    optional: true
 
   string-width@4.2.3:
     dependencies:
@@ -9143,6 +9163,7 @@ snapshots:
   strip-ansi@3.0.1:
     dependencies:
       ansi-regex: 2.1.1
+    optional: true
 
   strip-ansi@6.0.1:
     dependencies:
