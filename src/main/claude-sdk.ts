@@ -4,7 +4,205 @@ import {
   type PermissionResult,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { BrowserWindow } from 'electron'
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
+import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { homedir, userInfo, tmpdir } from 'node:os'
+
+// ============================================================================
+// PATH Augmentation - Runs IMMEDIATELY at Module Load Time
+// ============================================================================
+/**
+ * CRITICAL FIX for "spawn node ENOENT" error.
+ *
+ * When macOS launches an app via double-click, it provides a minimal PATH:
+ * /usr/bin:/bin:/usr/sbin:/sbin
+ *
+ * This doesn't include /usr/local/bin or /opt/homebrew/bin where Node.js
+ * is typically installed via Homebrew.
+ *
+ * This IIFE runs IMMEDIATELY when this module is imported, ensuring PATH
+ * is augmented BEFORE any other code runs.
+ */
+;(function initializeNodePath() {
+  const currentPath = process.env.PATH || ''
+  const originalPath = currentPath // Save for logging
+
+  // Common Node.js installation paths (in priority order)
+  const additionalPaths = [
+    '/usr/local/bin',           // Homebrew on Intel Macs
+    '/opt/homebrew/bin',        // Homebrew on Apple Silicon
+    '/usr/bin',                 // System installations
+  ]
+
+  // Filter paths that exist and aren't already in PATH
+  const newPaths = additionalPaths.filter(p => {
+    return existsSync(p) && !currentPath.split(':').includes(p)
+  })
+
+  if (newPaths.length > 0) {
+    // Prepend new paths to existing PATH (so they're searched first)
+    process.env.PATH = `${newPaths.join(':')}:${currentPath}`
+    console.log(`🚀 [PATH] Module load: Augmented PATH with Node.js locations`)
+    console.log(`   Added: ${newPaths.join(', ')}`)
+    console.log(`   Before: ${originalPath}`)
+    console.log(`   After:  ${process.env.PATH}`)
+  } else {
+    console.log(`✅ [PATH] Module load: Node.js paths already in PATH`)
+    console.log(`   Current: ${currentPath}`)
+  }
+})()
+
+// ============================================================================
+// SDK Path Resolution (Development vs Production)
+// ============================================================================
+/**
+ * Get the correct path to the Claude SDK in both dev and production.
+ * In production, the SDK is unpacked from ASAR to app.asar.unpacked/
+ */
+function getSDKPath(): string {
+  const isPackaged = app.isPackaged
+
+  if (!isPackaged) {
+    // Development: use node_modules directly
+    const devPath = join(process.cwd(), 'node_modules', '@anthropic-ai/claude-agent-sdk')
+    console.log(`🔍 [SDK Path] Development mode: ${devPath}`)
+    return devPath
+  }
+
+  // Production: SDK is unpacked in app.asar.unpacked
+  const prodPath = join(
+    process.resourcesPath,
+    'app.asar.unpacked',
+    'node_modules',
+    '@anthropic-ai/claude-agent-sdk'
+  )
+
+  console.log(`🔍 [SDK Path] Production mode: ${prodPath}`)
+  console.log(`🔍 [SDK Path] Resources path: ${process.resourcesPath}`)
+  console.log(`🔍 [SDK Path] SDK exists: ${existsSync(prodPath)}`)
+
+  // Verify CLI exists
+  const cliPath = join(prodPath, 'cli.js')
+  console.log(`🔍 [SDK Path] CLI path: ${cliPath}`)
+  console.log(`🔍 [SDK Path] CLI exists: ${existsSync(cliPath)}`)
+
+  return prodPath
+}
+
+/**
+ * Verify SDK is properly accessible (for debugging)
+ */
+export function verifySDKAccess(): boolean {
+  try {
+    const sdkPath = getSDKPath()
+    const cliPath = join(sdkPath, 'cli.js')
+    const vendorPath = join(sdkPath, 'vendor')
+
+    console.log('🔍 [SDK Verification] Checking SDK accessibility...')
+    console.log(`   - App packaged: ${app.isPackaged}`)
+    console.log(`   - SDK path exists: ${existsSync(sdkPath)}`)
+    console.log(`   - CLI exists: ${existsSync(cliPath)}`)
+    console.log(`   - Vendor exists: ${existsSync(vendorPath)}`)
+
+    return existsSync(sdkPath) && existsSync(cliPath)
+  } catch (error) {
+    console.error('❌ [SDK Verification] Failed:', error)
+    return false
+  }
+}
+
+// ============================================================================
+// Setup Authentication Provider
+// ============================================================================
+export async function setupAuthProvider(): Promise<string | null> {
+  try {
+    // Verify SDK accessibility in production
+    if (app.isPackaged) {
+      const sdkAccessible = verifySDKAccess()
+      if (!sdkAccessible) {
+        console.error('❌ [Auth] Claude SDK is not accessible in production!')
+        console.error('   This usually means asarUnpack is not configured correctly.')
+        return null
+      }
+    }
+
+    const { getActiveProvider, getCredentials, importFromShellEnv } = await import(
+      './credential-manager'
+    )
+    let activeProvider = await getActiveProvider()
+
+    // ============================================================================
+    // Auto-Import from Shell Environment if No Credentials Found
+    // ============================================================================
+    // LOGIC: If no provider is configured in keychain, automatically try to
+    // import credentials from shell config files (~/.zshrc, ~/.bashrc, etc.)
+    // This solves the issue where credentials exist in shell but production
+    // app doesn't inherit them (unlike dev mode which runs from terminal)
+    if (!activeProvider) {
+      console.log('ℹ️  [Auth] No provider found in keychain, attempting auto-import from shell...')
+      activeProvider = await importFromShellEnv()
+
+      if (activeProvider) {
+        console.log(`✅ [Auth] Auto-imported ${activeProvider} credentials from shell environment`)
+      } else {
+        console.log('⚠️ [Auth] No credentials found in shell environment either')
+        return null
+      }
+    }
+
+    if (activeProvider) {
+      console.log(`🔑 [Provider] Setting environment for: ${activeProvider}`)
+      const credentials = await getCredentials(activeProvider)
+
+      // Clear any existing provider env vars first
+      delete process.env.CLAUDE_CODE_USE_BEDROCK
+      delete process.env.CLAUDE_CODE_USE_VERTEX
+
+      if (credentials) {
+        if (activeProvider === 'bedrock') {
+          const bedrockCreds = credentials as any
+          process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+          process.env.AWS_ACCESS_KEY_ID = bedrockCreds.accessKeyId
+          process.env.AWS_SECRET_ACCESS_KEY = bedrockCreds.secretAccessKey
+          if (bedrockCreds.sessionToken)
+            process.env.AWS_SESSION_TOKEN = bedrockCreds.sessionToken
+          if (bedrockCreds.region) process.env.AWS_REGION = bedrockCreds.region
+          if (bedrockCreds.model)
+            process.env.ANTHROPIC_MODEL = bedrockCreds.model
+        } else if (activeProvider === 'vertex') {
+          const vertexCreds = credentials as any
+          process.env.CLAUDE_CODE_USE_VERTEX = '1'
+          process.env.CLOUD_ML_REGION = vertexCreds.region || 'global'
+          process.env.ANTHROPIC_VERTEX_PROJECT_ID = vertexCreds.projectId
+          if (vertexCreds.model) process.env.ANTHROPIC_MODEL = vertexCreds.model
+          if (vertexCreds.smallFastModel)
+            process.env.ANTHROPIC_SMALL_FAST_MODEL = vertexCreds.smallFastModel
+          if (vertexCreds.disablePromptCaching)
+            process.env.DISABLE_PROMPT_CACHING = '1'
+        } else if (activeProvider === 'anthropic') {
+          const anthropicCreds = credentials as any
+          if (anthropicCreds.apiKey)
+            process.env.ANTHROPIC_API_KEY = anthropicCreds.apiKey
+        }
+      }
+
+      // Log environment variables (redacted for security)
+      console.log('🔍 [Auth] Environment variables set:')
+      console.log(`   - CLAUDE_CODE_USE_BEDROCK: ${!!process.env.CLAUDE_CODE_USE_BEDROCK}`)
+      console.log(`   - CLAUDE_CODE_USE_VERTEX: ${!!process.env.CLAUDE_CODE_USE_VERTEX}`)
+      console.log(`   - ANTHROPIC_API_KEY: ${!!process.env.ANTHROPIC_API_KEY}`)
+      console.log(`   - AWS_ACCESS_KEY_ID: ${!!process.env.AWS_ACCESS_KEY_ID}`)
+    }
+    return activeProvider
+  } catch (error) {
+    console.error('⚠️ [Provider] Failed to load credentials:', error)
+    if (error instanceof Error) {
+      console.error('⚠️ [Provider] Error stack:', error.stack)
+    }
+    return null
+  }
+}
 
 // ============================================================================
 // In-Memory Cache for Auto-Accept State
@@ -231,57 +429,13 @@ export async function executeClaudeQuery(
     abortController,
   })
 
+  // Log current PATH for debugging
+  console.log(`🔍 [SDK Query] Current PATH: ${process.env.PATH}`)
+
   // ============================================================================
   // Set Provider Environment Variables
   // ============================================================================
-  // LOGIC: Load active provider and credentials, then set environment variables
-  // so the Claude SDK uses the correct authentication provider
-  try {
-    const { getActiveProvider, getCredentials } = await import(
-      './credential-manager'
-    )
-    const activeProvider = await getActiveProvider()
-
-    if (activeProvider) {
-      console.log(`🔑 [Provider] Setting environment for: ${activeProvider}`)
-      const credentials = await getCredentials(activeProvider)
-
-      // Clear any existing provider env vars first
-      delete process.env.CLAUDE_CODE_USE_BEDROCK
-      delete process.env.CLAUDE_CODE_USE_VERTEX
-
-      if (credentials) {
-        if (activeProvider === 'bedrock') {
-          const bedrockCreds = credentials as any
-          process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-          process.env.AWS_ACCESS_KEY_ID = bedrockCreds.accessKeyId
-          process.env.AWS_SECRET_ACCESS_KEY = bedrockCreds.secretAccessKey
-          if (bedrockCreds.sessionToken)
-            process.env.AWS_SESSION_TOKEN = bedrockCreds.sessionToken
-          if (bedrockCreds.region) process.env.AWS_REGION = bedrockCreds.region
-          if (bedrockCreds.model)
-            process.env.ANTHROPIC_MODEL = bedrockCreds.model
-        } else if (activeProvider === 'vertex') {
-          const vertexCreds = credentials as any
-          process.env.CLAUDE_CODE_USE_VERTEX = '1'
-          process.env.CLOUD_ML_REGION = vertexCreds.region || 'global'
-          process.env.ANTHROPIC_VERTEX_PROJECT_ID = vertexCreds.projectId
-          if (vertexCreds.model) process.env.ANTHROPIC_MODEL = vertexCreds.model
-          if (vertexCreds.smallFastModel)
-            process.env.ANTHROPIC_SMALL_FAST_MODEL = vertexCreds.smallFastModel
-          if (vertexCreds.disablePromptCaching)
-            process.env.DISABLE_PROMPT_CACHING = '1'
-        } else if (activeProvider === 'anthropic') {
-          const anthropicCreds = credentials as any
-          if (anthropicCreds.apiKey)
-            process.env.ANTHROPIC_API_KEY = anthropicCreds.apiKey
-        }
-      }
-    }
-  } catch (error) {
-    console.error('⚠️ [Provider] Failed to load credentials:', error)
-    // Continue anyway - might be using CLI authentication
-  }
+  await setupAuthProvider()
 
   // ============================================================================
   // Initialize Auto-Accept Cache
@@ -454,6 +608,36 @@ export async function executeClaudeQuery(
     // Override model to fix Claude Code bug with AWS Bedrock model identifier
 
     console.log('abortController from line 456:', abortController)
+
+    // ============================================================================
+    // Prepare Complete Environment for Spawned CLI Process
+    // ============================================================================
+    // CRITICAL FIX: When launched via double-click, macOS provides minimal environment
+    // without HOME, USER, TMPDIR, etc. The AWS SDK REQUIRES these variables.
+    //
+    // We use Node.js APIs (os.homedir(), os.userInfo()) which work even when
+    // environment variables aren't set, ensuring the CLI has everything it needs.
+    const spawnEnv = {
+      ...process.env,
+      // HOME: Required by AWS SDK to find ~/.aws/credentials and ~/.aws/config
+      HOME: process.env.HOME || homedir(),
+      // USER: Used by AWS SDK for profile resolution and logging
+      USER: process.env.USER || userInfo().username,
+      // TMPDIR: Required for AWS SDK temporary credential caching
+      TMPDIR: process.env.TMPDIR || tmpdir(),
+      // LANG: Required for proper string encoding in AWS API calls
+      LANG: process.env.LANG || 'en_US.UTF-8',
+      // AWS_SDK_LOAD_CONFIG: Explicitly tell AWS SDK to load ~/.aws/config
+      AWS_SDK_LOAD_CONFIG: '1',
+    }
+
+    console.log(`🔍 [SDK Query] Environment prepared for CLI spawn:`)
+    console.log(`   HOME: ${spawnEnv.HOME}`)
+    console.log(`   USER: ${spawnEnv.USER}`)
+    console.log(`   TMPDIR: ${spawnEnv.TMPDIR}`)
+    console.log(`   LANG: ${spawnEnv.LANG}`)
+    console.log(`   AWS_SDK_LOAD_CONFIG: ${spawnEnv.AWS_SDK_LOAD_CONFIG}`)
+
     const result = query({
       prompt,
       options: {
@@ -468,6 +652,8 @@ export async function executeClaudeQuery(
           type: 'preset',
           preset: 'claude_code',
         },
+        // ✨ CRITICAL FIX: Pass complete environment with all required variables
+        env: spawnEnv,
       },
     })
 

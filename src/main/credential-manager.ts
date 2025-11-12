@@ -155,3 +155,41 @@ export function detectExistingEnvVars(
       return {}
   }
 }
+
+/**
+ * Import credentials from shell environment files and save to keychain
+ * This is called automatically on first launch when no credentials are found
+ */
+export async function importFromShellEnv(): Promise<AuthProvider | null> {
+  try {
+    console.log('🔄 [Import] Attempting to import credentials from shell environment...')
+
+    // Import the shell parser
+    const { readShellEnvCredentials } = await import('./shell-env-parser')
+
+    // Try to read credentials from shell config files
+    const result = readShellEnvCredentials()
+
+    if (!result) {
+      console.log('ℹ️  [Import] No credentials found in shell environment')
+      return null
+    }
+
+    const { provider, credentials } = result
+
+    console.log(`💾 [Import] Saving ${provider} credentials to keychain...`)
+
+    // Save credentials to keychain
+    await saveCredentials(provider, credentials)
+
+    // Set as active provider
+    await setActiveProvider(provider)
+
+    console.log(`✅ [Import] Successfully imported ${provider} credentials from shell environment`)
+
+    return provider
+  } catch (error) {
+    console.error('❌ [Import] Failed to import credentials from shell environment:', error)
+    return null
+  }
+}

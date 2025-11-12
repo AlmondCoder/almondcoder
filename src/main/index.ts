@@ -2166,11 +2166,9 @@ ipcMain.on(
  */
 ipcMain.handle('check-claude-authentication', async () => {
   try {
-    console.log('🔐 [Auth Check] Testing Claude SDK authentication...')
-
-    // Get active provider if configured
-    const { getActiveProvider } = await import('./credential-manager')
-    const activeProvider = await getActiveProvider()
+    // Setup auth provider before testing SDK
+    const { setupAuthProvider } = await import('./claude-sdk')
+    const activeProvider = await setupAuthProvider()
 
     // Import query function from SDK
     const { query } = await import('@anthropic-ai/claude-agent-sdk')
@@ -2180,7 +2178,7 @@ ipcMain.handle('check-claude-authentication', async () => {
     const testQuery = query({
       prompt: 'test',
       options: {
-        cwd: '/tmp',
+        cwd: app.getPath('home'),
         allowedTools: [],
         permissionMode: 'bypassPermissions',
       },
@@ -2203,49 +2201,13 @@ ipcMain.handle('check-claude-authentication', async () => {
       authenticated: false,
       error: 'SDK returned no messages',
       errorType: 'unknown',
-      currentProvider: activeProvider,
     }
   } catch (error: any) {
     console.error('❌ [Auth Check] Authentication check failed:', error)
-
-    // Check for specific authentication errors
-    const errorMessage = error?.message || String(error)
-
-    let errorType: 'auth' | 'model' | 'network' | 'unknown' = 'unknown'
-    let suggestedProvider: 'bedrock' | 'vertex' | undefined
-
-    // Detect error type and suggest provider
-    if (
-      errorMessage.includes('model identifier') ||
-      errorMessage.includes('invalid model')
-    ) {
-      errorType = 'model'
-      suggestedProvider = 'bedrock'
-    } else if (
-      errorMessage.includes('authentication') ||
-      errorMessage.includes('API key') ||
-      errorMessage.includes('unauthorized') ||
-      errorMessage.includes('401')
-    ) {
-      errorType = 'auth'
-    } else if (
-      errorMessage.includes('network') ||
-      errorMessage.includes('timeout') ||
-      errorMessage.includes('ECONNREFUSED')
-    ) {
-      errorType = 'network'
-    }
-
-    // Get active provider
-    const { getActiveProvider } = await import('./credential-manager')
-    const activeProvider = await getActiveProvider()
-
     return {
       authenticated: false,
-      error: errorMessage,
-      errorType,
-      suggestedProvider,
-      currentProvider: activeProvider,
+      error: error?.message || String(error),
+      errorType: 'auth',
     }
   }
 })

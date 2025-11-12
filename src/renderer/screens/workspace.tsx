@@ -5,6 +5,7 @@ import { useTheme, createThemeClasses } from '../theme/ThemeContext'
 import { Overview } from '../components/workspace/Overview'
 import { Prompts } from '../components/workspace/Prompts'
 import { Settings as SettingsComponent } from '../components/workspace/Settings'
+import { trackPageView, trackEvent } from '../services/posthog'
 
 interface LocationState {
   projectPath: string
@@ -28,6 +29,13 @@ export function WorkspaceScreen() {
       const projectName =
         projectContext.projectPath.split('/').pop() || 'Project'
       window.App.setWindowTitle(`AlmondCoder - ${projectName}`)
+
+      // Track workspace opened
+      trackEvent('workspace_opened', {
+        project_name: projectName,
+        project_path: projectContext.projectPath,
+        selected_branch: projectContext.selectedBranch,
+      })
     }
 
     // Cleanup when leaving workspace
@@ -38,6 +46,14 @@ export function WorkspaceScreen() {
     }
   }, [projectContext?.projectPath])
   const [activeSection, setActiveSection] = useState('prompts')
+
+  // Track page view when section changes
+  useEffect(() => {
+    trackPageView(`workspace/${activeSection}`, {
+      section: activeSection,
+      project_path: projectContext?.projectPath,
+    })
+  }, [activeSection, projectContext?.projectPath])
 
   const topMenuItems = [
     { icon: ChatsTeardropIcon, label: 'Prompts', key: 'prompts' },

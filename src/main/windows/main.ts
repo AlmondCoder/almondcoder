@@ -25,8 +25,8 @@ export async function MainWindow() {
     fullscreenable: true,
     alwaysOnTop: false,
     autoHideMenuBar: true,
-
     webPreferences: {
+      devTools: true,
       preload: join(__dirname, '../preload/index.js'),
     },
   })

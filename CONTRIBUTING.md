@@ -233,7 +233,7 @@ src/
 ### Key Files
 
 - `electron.vite.config.ts` - Build configuration
-- `electron-builder.ts` - Package configuration
+- `electron-builder.js` - Package configuration
 - `CLAUDE.md` - Project documentation for Claude AI
 - `biome.json` - Linter/formatter configuration
 

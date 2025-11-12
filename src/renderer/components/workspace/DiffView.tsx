@@ -95,13 +95,13 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'added':
-        return 'text-green-400'
+        return '#22c55e' // green-400
       case 'modified':
-        return 'text-yellow-400'
+        return '#bf8700' // GitHub modified yellow
       case 'deleted':
-        return 'text-red-400'
+        return '#f87171' // red-400
       default:
-        return 'text-gray-400'
+        return '#9ca3af' // gray-400
     }
   }
 
@@ -190,12 +190,12 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
             <h3 className={`text-sm font-semibold ${themeClasses.textPrimary}`}>
               {diffs.length} file{diffs.length !== 1 ? 's' : ''} changed
             </h3>
-            <div className="flex items-center gap-3 text-xs mt-1">
-              <span className="text-green-400 flex items-center gap-1">
+            <div className="flex items-center gap-3 text-xs mt-1 text-gray-400">
+              <span className="flex items-center gap-1">
                 <Plus className="w-3 h-3" />
                 {totalAdditions}
               </span>
-              <span className="text-red-400 flex items-center gap-1">
+              <span className="flex items-center gap-1">
                 <Minus className="w-3 h-3" />
                 {totalDeletions}
               </span>
@@ -226,7 +226,7 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                 onClick={() => toggleFileExpansion(diff.filePath)}
               >
                 <div className="flex items-center gap-3">
-                  <span className={getStatusColor(diff.status)}>
+                  <span style={{ color: getStatusColor(diff.status) }}>
                     {getStatusIcon(diff.status)}
                   </span>
                   <span
@@ -235,15 +235,16 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                     {diff.filePath}
                   </span>
                   <span
-                    className={`text-xs ${getStatusColor(diff.status)} uppercase`}
+                    className="text-xs uppercase"
+                    style={{ color: getStatusColor(diff.status) }}
                   >
                     {diff.status}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-green-400">+{diff.additions}</span>
-                    <span className="text-red-400">-{diff.deletions}</span>
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <span>+{diff.additions}</span>
+                    <span>-{diff.deletions}</span>
                   </div>
                   <svg
                     className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
@@ -275,10 +276,10 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                               className="px-3 py-2 font-semibold"
                               key={lineKey}
                               style={{
-                                backgroundColor: isLightTheme ? '#f6f8fa' : '#161b22',
-                                color: isLightTheme ? '#57606a' : '#8b949e',
-                                borderTop: isLightTheme ? '1px solid #d0d7de' : '1px solid #30363d',
-                                borderBottom: isLightTheme ? '1px solid #d0d7de' : '1px solid #30363d',
+                                backgroundColor: '#f6f8fa',
+                                color: '#57606a',
+                                borderTop: '1px solid #d0d7de',
+                                borderBottom: '1px solid #d0d7de',
                               }}
                             >
                               {line.content}
@@ -286,53 +287,30 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                           )
                         }
 
-                        // GitHub-style colors
+                        // GitHub-style colors (light theme)
                         const bgColor =
                           line.type === 'added'
-                            ? isLightTheme
-                              ? '#e6ffec'  // GitHub light green background
-                              : '#1a2e23'  // GitHub dark green background
+                            ? '#dafbe1' // GitHub light green background
                             : line.type === 'deleted'
-                              ? isLightTheme
-                                ? '#ffebe9'  // GitHub light red background
-                                : '#2e1e1f'  // GitHub dark red background
+                              ? '#ffebe9' // GitHub light red background
                               : 'transparent'
 
-                        const textColor =
-                          line.type === 'added'
-                            ? isLightTheme
-                              ? '#1f2328'  // GitHub dark text on light
-                              : '#adbac7'  // GitHub light text on dark
-                            : line.type === 'deleted'
-                              ? isLightTheme
-                                ? '#1f2328'
-                                : '#adbac7'
-                              : isLightTheme
-                                ? '#1f2328'
-                                : '#adbac7'
+                        const textColor = '#1f2328' // GitHub text color
 
                         const lineNumberBg =
                           line.type === 'added'
-                            ? isLightTheme
-                              ? '#ccffd8'  // Darker green for line numbers
-                              : '#113221'
+                            ? '#bef5be' // GitHub light green for line numbers
                             : line.type === 'deleted'
-                              ? isLightTheme
-                                ? '#ffd7d5'  // Darker red for line numbers
-                                : '#3a1418'
+                              ? '#ffd7d5' // GitHub light red for line numbers
                               : 'transparent'
 
-                        const lineNumberColor = isLightTheme ? '#57606a' : '#6e7681'
+                        const lineNumberColor = '#57606a'
 
                         const signColor =
                           line.type === 'added'
-                            ? isLightTheme
-                              ? '#1a7f37'  // GitHub green plus sign
-                              : '#3fb950'
+                            ? '#1a7f37' // GitHub green plus sign
                             : line.type === 'deleted'
-                              ? isLightTheme
-                                ? '#cf222e'  // GitHub red minus sign
-                                : '#f85149'
+                              ? '#cf222e' // GitHub red minus sign
                               : 'transparent'
 
                         return (
@@ -347,7 +325,7 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                             <div
                               className="flex-shrink-0 select-none flex"
                               style={{
-                                backgroundColor: lineNumberBg || (isLightTheme ? '#ffffff' : '#0d1117'),
+                                backgroundColor: lineNumberBg || '#ffffff',
                               }}
                             >
                               {/* Old line number */}
@@ -360,7 +338,8 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                                   lineHeight: '20px',
                                 }}
                               >
-                                {line.type === 'deleted' || line.type === 'context'
+                                {line.type === 'deleted' ||
+                                line.type === 'context'
                                   ? line.oldLineNumber || ''
                                   : ''}
                               </span>
@@ -372,10 +351,11 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                                   color: lineNumberColor,
                                   fontSize: '12px',
                                   lineHeight: '20px',
-                                  borderLeft: isLightTheme ? '1px solid #d0d7de' : '1px solid #30363d',
+                                  borderLeft: '1px solid #d0d7de',
                                 }}
                               >
-                                {line.type === 'added' || line.type === 'context'
+                                {line.type === 'added' ||
+                                line.type === 'context'
                                   ? line.newLineNumber || ''
                                   : ''}
                               </span>
@@ -386,19 +366,38 @@ export function DiffView({ projectPath, worktreePath }: DiffViewProps) {
                               className="flex-1 px-2 py-0.5 m-0 whitespace-pre overflow-x-visible cursor-text select-text"
                               style={{
                                 color: textColor,
-                                fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+                                fontFamily:
+                                  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
                                 fontSize: '12px',
                                 lineHeight: '20px',
                               }}
                             >
                               {line.type === 'added' && (
-                                <span style={{ color: signColor, marginRight: '4px' }}>+</span>
+                                <span
+                                  style={{
+                                    color: signColor,
+                                    marginRight: '4px',
+                                  }}
+                                >
+                                  +
+                                </span>
                               )}
                               {line.type === 'deleted' && (
-                                <span style={{ color: signColor, marginRight: '4px' }}>-</span>
+                                <span
+                                  style={{
+                                    color: signColor,
+                                    marginRight: '4px',
+                                  }}
+                                >
+                                  -
+                                </span>
                               )}
                               {line.type === 'context' && (
-                                <span style={{ marginRight: '4px', opacity: 0 }}>·</span>
+                                <span
+                                  style={{ marginRight: '4px', opacity: 0 }}
+                                >
+                                  ·
+                                </span>
                               )}
                               {line.content}
                             </pre>

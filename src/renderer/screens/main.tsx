@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CloneRepositoryModal } from '../components/ui/clone-repository-modal'
 import { useTheme, createThemeClasses } from '../theme/ThemeContext'
+import { trackPageView, trackEvent } from '../services/posthog'
 
 // The "App" comes from the context bridge in preload/index.ts
 const { App } = window
@@ -29,6 +30,11 @@ export function MainScreen() {
   // Check authentication on mount
   useEffect(() => {
     checkAuthenticationStatus()
+
+    // Track page view
+    trackPageView('main', {
+      screen: 'project_selection',
+    })
   }, [])
 
   const checkAuthenticationStatus = async () => {
@@ -105,6 +111,13 @@ export function MainScreen() {
         await App.addRecentProject({ name: projectName, path: selectedPath })
         await loadRecentProjects()
 
+        // Track project selection
+        trackEvent('project_selected', {
+          method: 'browse',
+          project_name: projectName,
+          branch_count: gitBranches.length,
+        })
+
         // Launch workspace directly
         console.log('Launching project:', {
           projectPath: selectedPath,
@@ -140,6 +153,13 @@ export function MainScreen() {
       // Update recent projects with new timestamp
       await App.addRecentProject({ name: project.name, path: project.path })
       await loadRecentProjects()
+
+      // Track project selection
+      trackEvent('project_selected', {
+        method: 'recent',
+        project_name: project.name,
+        branch_count: gitBranches.length,
+      })
 
       // Launch workspace directly
       console.log('Launching project:', {

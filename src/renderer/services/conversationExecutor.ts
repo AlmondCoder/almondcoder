@@ -13,6 +13,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversationHistory, EnhancedPromptHistoryItem } from '../../shared/types'
 import { createMessageHandler, type MessageHandlerConfig, Response } from './conversationMessageHandler'
+import { trackEvent } from './posthog'
 
 export interface ProjectContext {
   projectPath: string
@@ -71,6 +72,14 @@ export async function executeConversation(
   console.log('   New conversation:', isNewConversation)
   console.log('   Prompt:', promptText.substring(0, 50) + '...')
 
+  // Track conversation start
+  trackEvent(isNewConversation ? 'conversation_started' : 'conversation_continued', {
+    prompt_length: promptText.length,
+    branch: selectedBranch || 'unknown',
+    auto_accept_enabled: autoAcceptEnabled,
+    project_path: projectContext.projectPath,
+  })
+
   try {
     // ============================================================================
     // Phase 1: Setup Conversation Context
@@ -123,6 +132,12 @@ export async function executeConversation(
 
     console.log('✅ [ConversationExecutor] Execution completed successfully')
 
+    // Track successful completion
+    trackEvent('conversation_completed', {
+      prompt_id: context.promptId,
+      is_new: isNewConversation,
+    })
+
     return {
       success: true,
       promptId: context.promptId,
@@ -132,6 +147,13 @@ export async function executeConversation(
 
   } catch (error) {
     console.error('❌ [ConversationExecutor] Execution failed:', error)
+
+    // Track execution error
+    trackEvent('conversation_error', {
+      prompt_id: conversation.promptId || 'unknown',
+      error_message: error instanceof Error ? error.message : String(error),
+      is_new: isNewConversation,
+    })
 
     return {
       success: false,

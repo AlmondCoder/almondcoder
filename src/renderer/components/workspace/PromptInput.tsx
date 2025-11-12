@@ -167,7 +167,9 @@ export function PromptInput({
       <div className="relative">
         <textarea
           className={`w-full p-4 pb-0 outline-none bg-transparent resize-none focus:outline-none ${
-            isNewConversation ? 'min-h-[120px] max-h-[120px]' : 'h-[70px] max-h-[70px]'
+            isNewConversation
+              ? 'min-h-[120px] max-h-[120px]'
+              : 'h-[70px] max-h-[70px]'
           } ${
             isLightTheme
               ? 'text-gray-900 placeholder-gray-400'
@@ -183,7 +185,7 @@ export function PromptInput({
           style={{
             fontSize: isNewConversation ? '0.875rem' : undefined,
             overflowY: 'auto',
-            paddingBottom: '4px'
+            paddingBottom: '4px',
           }}
           value={currentPrompt}
         />
@@ -372,12 +374,8 @@ export function PromptInput({
           <button
             className={`disabled:opacity-50 disabled:cursor-not-allowed p-2 rounded transition-colors flex items-center justify-center flex-shrink-0 ${
               isExecuting
-                ? isLightTheme
-                  ? 'bg-red-500 hover:bg-red-600'
-                  : 'bg-red-600 hover:bg-red-700'
-                : isLightTheme
-                  ? 'bg-black hover:bg-gray-800'
-                  : 'bg-white hover:bg-gray-200'
+                ? 'bg-black hover:bg-gray-800'
+                : 'bg-black hover:bg-gray-800'
             }`}
             disabled={
               !projectContext ||
@@ -400,10 +398,7 @@ export function PromptInput({
             }
           >
             {isExecuting ? (
-              <Square
-                className="w-4 h-4 text-white"
-                weight="fill"
-              />
+              <Square className="w-4 h-4 text-white" weight="fill" />
             ) : (
               <ArrowUp
                 className={`w-4 h-4 ${
